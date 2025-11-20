@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+  </head>
+  <body>
+    <div class="data-modal-overlay">
+      <div class="data-modal">
+        <div class="data-header">
+          <h3>📝 Completa i tuoi dati per continuare</h3>
+          <button (click)="cancelDataModal()" class="close-data-button">
+            ✕
+          </button>
+        </div>
+
+        <div class="data-content">
+          <div class="data-info">
+            <p>Per procedere con il pagamento, abbiamo bisogno di alcuni dati:</p>
+          </div>
+
+          <form class="data-form" (ngSubmit)="submitUserData()">
+            <div class="form-section">
+              <h4>Dati di Contatto</h4>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="email">Email *:</label>
+                  <input
+                    type="email"
+                    id="email"
+                    [(ngModel)]="userData.email"
+                    name="email"
+                    placeholder="tua@email.com"
+                    required
+                    [class.error]="hasError('email')"
+                  />
+                  <span *ngIf="hasError('email')" class="error-message">{{
+                    dataFormErrors["email"]
+                  }}</span>
+                </div>
+              </div>
+
+              <!-- ✅ Checkbox per fattura -->
+              <div class="form-group checkbox-group">
+                <span class="checkbox-text">
+                  📧 Riceverai una fattura via email
+                </span>
+              </div>
+            </div>
+
+            <div
+              *ngIf="dataFormErrors['general']"
+              class="error-message general-error"
+            >
+              {{ dataFormErrors["general"] }}
+            </div>
+
+            <div *ngIf="isValidatingData" class="data-loading">
+              <div class="loading-spinner"></div>
+              <p>Convalida dei dati...</p>
+            </div>
+            <div class="form-group" style="margin: 16px 0">
+              <label>
+                <input
+                  type="checkbox"
+                  [(ngModel)]="aceptaTerminos"
+                  name="aceptaTerminos"
+                  required
+                />
+                Accetto i
+                <a
+                  routerLink="/termini-condizioni"
+                  target="_blank"
+                  href="termini-condizioni-ecos"
+                  (click)="$event.stopPropagation()"
+                >
+                  Termini e Condizioni
+                </a>
+                *
+              </label>
+
+              <label>
+                <input
+                  type="checkbox"
+                  [(ngModel)]="datosVeridicos"
+                  name="datosVeridicos"
+                  required
+                />
+                Confermo che i dati forniti sono veritieri e completi
+              </label>
+
+              <!-- ✅ Messaggi di errore corretti -->
+              <span *ngIf="showDatosVeridicosError" class="error-message">
+                Devi confermare che i dati inseriti sono veritieri
+              </span>
+              <span *ngIf="showTerminosError" class="error-message">
+                Devi accettare i Termini e Condizioni
+              </span>
+            </div>
+
+            <div class="data-actions">
+              <button
+                type="button"
+                (click)="cancelDataModal()"
+                class="cancel-button"
+                [disabled]="isValidatingData"
+              >
+                Annulla
+              </button>
+              <!-- ✅ Pulsante corretto - solo type="submit", senza (click) -->
+              <button
+                type="submit"
+                [disabled]="
+                  isValidatingData || !aceptaTerminos || !datosVeridicos
+                "
+                class="continue-button"
+              >
+                <span *ngIf="!isValidatingData">Continua al Pagamento</span>
+                <span *ngIf="isValidatingData">Elaborazione...</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

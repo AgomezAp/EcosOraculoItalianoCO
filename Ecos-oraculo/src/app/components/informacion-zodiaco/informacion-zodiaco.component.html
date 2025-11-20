@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Documento</title>
+  </head>
+  <body>
+    <div class="oracle-container">
+      <!-- Video di sfondo -->
+      <video autoplay muted loop playsinline class="background-video">
+        <source src="/ZODIACO.mp4" type="video/mp4" />
+        Il tuo browser non supporta i video HTML5.
+      </video>
+
+      <!-- Overlay opzionale per migliorare la leggibilità -->
+      <div class="video-overlay"></div>
+      <div class="content-with-navbar">
+        <div class="oracle-main">
+          <!-- Informazioni dell'astrologo -->
+          <div class="interpreter-info">
+            <div class="interpreter-avatar">
+              <img
+                class="mystical-orb-image"
+                src="/Maestra-2.webp"
+                alt="Avatar Maestra"
+              />
+            </div>
+            <div class="interpreter-details">
+              <!-- Prima riga: nome + icona + titolo insieme -->
+              <div class="name-title-row">
+                <h3>{{ astrologerInfo.name }}</h3>
+                <span class="separator-icon">»</span>
+                <p class="interpreter-title">{{ astrologerInfo.title }}</p>
+              </div>
+              <!-- Seconda riga: specialità sotto IN MAIUSCOLO -->
+              <p class="interpreter-specialty">
+                Specialista in Astrologia e Segni Zodiacali
+              </p>
+            </div>
+            <button
+              class="close-chat-btn"
+              onclick="window.location.href='/'"
+              aria-label="Chiudi"
+            >
+              <svg
+                class="close-icon"
+                width="12"
+                height="12"
+                viewBox="0 0 12 12"
+              >
+                <path
+                  d="M1 1L11 11M1 11L11 1"
+                  stroke="gray"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </button>
+          </div>
+
+          <!-- Area di conversazione -->
+          <div class="chat-area">
+            <div
+              class="messages-container"
+              #scrollContainer
+              (scroll)="onScroll($event)"
+            >
+              <div *ngFor="let message of messages" class="message-container">
+                <!-- Messaggi dell'astrologo -->
+                <div
+                  *ngIf="!message.isUser"
+                  class="interpreter-message-wrapper"
+                >
+                  <div class="message-avatar">
+                    <img
+                      class="interpreter-avatar-small"
+                      src="/Maestra-2.webp"
+                      alt="Avatar Maestra"
+                    />
+                  </div>
+
+                  <div class="message-content">
+                    <div
+                      class="message-bubble interpreter-message"
+                      [class.blocked-message]="isMessageBlocked(message)"
+                    >
+                      <!-- CONTENUTO ORIGINALE (si sfuma se bloccato) -->
+                      <div
+                        class="message-text"
+                        [class.blurred-content]="isMessageBlocked(message)"
+                      >
+                        <p [innerHTML]="formatMessage(message.content)"></p>
+                      </div>
+
+                      <!-- OVERLAY DI PAGAMENTO (appare solo se bloccato) -->
+                      <div
+                        *ngIf="isMessageBlocked(message)"
+                        class="message-payment-overlay"
+                      >
+                        <div class="payment-prompt">
+                          <span class="lock-icon">🔒</span>
+                          <p><strong>Contenuto Premium</strong></p>
+                          <p>
+                            Paga €8 per vedere questa interpretazione astrale e
+                            accedere a consultazioni illimitate
+                          </p>
+                          <button
+                            (click)="promptForPayment()"
+                            class="unlock-button"
+                          >
+                            💳 Sblocca per €8
+                          </button>
+                        </div>
+                      </div>
+
+                      <span class="message-time">{{
+                        message.timestamp | date : "HH:mm"
+                      }}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Messaggi dell'utente -->
+                <div *ngIf="message.isUser" class="user-message-wrapper">
+                  <div class="message-avatar">
+                    <img
+                      class="user-avatar-image"
+                      src="/Visitante.webp"
+                      alt="Avatar Utente"
+                    />
+                  </div>
+
+                  <div class="message-content">
+                    <div class="message-bubble user-message">
+                      <p [innerHTML]="formatMessage(message.content)"></p>
+                      <span class="message-time">{{
+                        message.timestamp | date : "HH:mm"
+                      }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Indicatore di scrittura -->
+              <div *ngIf="isLoading" class="message-container typing-indicator">
+                <div class="interpreter-message-wrapper">
+                  <div class="message-avatar">
+                    <img
+                      class="interpreter-avatar-small"
+                      src="/Maestra-2.webp"
+                      alt="Avatar Maestra"
+                    />
+                  </div>
+                  <div class="message-content">
+                    <div class="message-bubble interpreter-message typing">
+                      <div class="typing-dots">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                      </div>
+                      <p class="typing-text">
+                        Maestra Valentina sta consultando le stelle...
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Area di input -->
+          <div class="input-area">
+            <div class="input-container">
+              <div class="text-input-wrapper">
+                <textarea
+                  class="message-input"
+                  [(ngModel)]="currentMessage"
+                  placeholder="Chiedi sull'astrologia e i segni zodiacali..."
+                  rows="1"
+                  maxlength="1500"
+                  (keydown)="onKeyPress($event)"
+                  (input)="autoResize($event)"
+                  [disabled]="isLoading"
+                >
+                </textarea>
+              </div>
+
+              <div class="action-buttons">
+                <button
+                  class="clear-button"
+                  (click)="clearConversation()"
+                  [disabled]="isLoading"
+                  title="Nuova consultazione"
+                >
+                  <i class="fas fa-redo"></i>
+                </button>
+                <button
+                  class="send-button"
+                  id="send-button"
+                  (click)="sendMessage()"
+                  [disabled]="isLoading || !currentMessage.trim()"
+                >
+                  <i class="fas fa-paper-plane"></i>
+                  <div *ngIf="isLoading" class="simple-spinner">⟳</div>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MODALE DI PAGAMENTO -->
+      <div *ngIf="showPaymentModal" class="payment-modal-overlay">
+        <div class="payment-modal">
+          <div class="payment-header">
+            <h3>🌟 Sblocca Consultazioni Astrali Illimitate</h3>
+            <button (click)="cancelPayment()" class="close-payment-button">
+              ✕
+            </button>
+          </div>
+
+          <div class="payment-content">
+            <div class="payment-info">
+              <p>Prima consultazione gratuita completata.</p>
+              <p>Per continuare a consultare gli astri illimitatamente:</p>
+            </div>
+
+            <div class="payment-price">
+              <span class="price-amount">4.00€</span>
+              <span class="price-description"
+                >Accesso completo alle interpretazioni astrali</span
+              >
+            </div>
+
+            <div *ngIf="isProcessingPayment" class="payment-loading">
+              <div class="loading-spinner"></div>
+              <p>Preparando sistema di pagamento...</p>
+            </div>
+
+            <div
+              id="payment-element-container"
+              class="payment-element-container"
+              [hidden]="isProcessingPayment"
+            >
+              <!-- Stripe Payment Element si monta qui -->
+            </div>
+
+            <div *ngIf="paymentError" class="payment-error">
+              <span>{{ paymentError }}</span>
+            </div>
+
+            <div class="payment-actions">
+              <button
+                (click)="handlePaymentSubmit()"
+                [disabled]="isProcessingPayment"
+                class="pay-button"
+              >
+                <span *ngIf="!isProcessingPayment">💳 Paga e Continua</span>
+                <span *ngIf="isProcessingPayment">Elaborando...</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <app-recolecta-datos
+        *ngIf="showDataModal"
+        (onDataSubmitted)="onUserDataSubmitted($event)"
+        (onModalClosed)="onDataModalClosed()"
+      >
+      </app-recolecta-datos>
+      <app-fortune-wheel
+        [isVisible]="showFortuneWheel"
+        [prizes]="astralPrizes"
+        (onPrizeWon)="onPrizeWon($event)"
+        (onWheelClosed)="onWheelClosed()"
+      >
+      </app-fortune-wheel>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+  </head>
+  <body>
+    <video autoplay muted loop playsinline class="background-video">
+      <source src="/MAPA-VOCACIONAL.mp4" type="video/mp4" />
+      Il tuo browser non supporta i video HTML5.
+    </video>
+
+    <!-- Overlay opzionale per migliorare la leggibilità -->
+    <div class="video-overlay"></div>
+    <div class="main-content">
+      <div class="vocational-container">
+        <!-- Header del consigliere -->
+        <div class="counselor-header">
+          <div class="counselor-info">
+            <div class="interpreter-avatar">
+              <img
+                class="mystical-orb-image"
+                src="/Maestra-4.webp"
+                alt="Avatar Maestra"
+              />
+            </div>
+            <div class="interpreter-details">
+              <!-- Prima riga: nome + icona + titolo insieme -->
+              <div class="name-title-row">
+                <h3>{{ counselorInfo.name }}</h3>
+                <span class="separator-icon">»</span>
+                <p class="interpreter-title">{{ counselorInfo.title }}</p>
+              </div>
+              <!-- Seconda riga: specialità sotto IN MAIUSCOLO -->
+              <p class="interpreter-specialty">{{ counselorInfo.specialty }}</p>
+            </div>
+          </div>
+          <button
+            class="close-chat-btn"
+            onclick="window.location.href='/'"
+            aria-label="Chiudi"
+          >
+            <svg class="close-icon" width="12" height="12" viewBox="0 0 12 12">
+              <path
+                d="M1 1L11 11M1 11L11 1"
+                stroke="gray"
+                stroke-width="2"
+                stroke-linecap="round"
+              />
+            </svg>
+          </button>
+        </div>
+
+        <!-- Contenuto delle schede -->
+        <div class="tab-content">
+          <!-- TAB: CHAT -->
+          <div *ngIf="currentTab === 'chat'" class="chat-section">
+            <!-- Area dei messaggi -->
+            <div
+              class="chat-messages"
+              #chatContainer
+              (scroll)="onScroll($event)"
+            >
+              <div
+                *ngFor="let message of chatMessages"
+                class="message"
+                [class.user-message]="message.isUser"
+                [class.counselor-message]="!message.isUser"
+                [class.blocked-message]="isMessageBlocked(message)"
+              >
+                <div class="message-avatar">
+                  <img
+                    *ngIf="message.isUser"
+                    class="user-avatar-image"
+                    src="/Visitante.webp"
+                    alt="Avatar Utente"
+                  />
+                  <img
+                    *ngIf="!message.isUser"
+                    class="interpreter-avatar-small"
+                    src="/Maestra-4.webp"
+                    alt="Avatar Maestra"
+                  />
+                </div>
+
+                <div class="message-content">
+                  <!-- CONTENUTO ORIGINALE (si sfuma se bloccato) -->
+                  <div [class.blurred-content]="isMessageBlocked(message)">
+                    <div class="message-text">
+                      <div [innerHTML]="formatMessage(message.content)"></div>
+                      <!-- ORA DENTRO LA BOLLA DI TESTO -->
+                      <div class="message-time-inside">
+                        {{ getTimeString(message.timestamp) }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- OVERLAY DI PAGAMENTO (appare solo se bloccato) -->
+                  <div
+                    *ngIf="isMessageBlocked(message)"
+                    class="message-payment-overlay"
+                  >
+                    <div class="payment-prompt">
+                      <span class="lock-icon">🔒</span>
+                      <p><strong>Contenuto Premium</strong></p>
+                      <p>
+                        Paga €8 per vedere questa orientazione vocazionale e accedere a
+                        consultazioni illimitate
+                      </p>
+                      <button
+                        (click)="promptForPayment()"
+                        class="unlock-button"
+                      >
+                        💳 Sblocca per €8
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Indicatore di caricamento -->
+              <div *ngIf="isLoading" class="loading-message">
+                <div class="loading-avatar">
+                  <img
+                    class="interpreter-avatar-small"
+                    src="/Maestra-4.webp"
+                    alt="Avatar Maestra"
+                  />
+                </div>
+                <div class="loading-content">
+                  <div class="loading-dots">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </div>
+                  <p class="loading-text">
+                    Maestra Valentina sta analizzando la tua consultazione...
+                  </p>
+                </div>
+              </div>
+            </div>
+            <!-- Area di input dei messaggi -->
+            <div class="chat-input-area">
+              <div class="input-container">
+                <div class="text-input-wrapper">
+                  <textarea
+                    class="message-input"
+                    [(ngModel)]="currentMessage"
+                    (keydown)="onKeyPress($event)"
+                    (input)="autoResize($event)"
+                    placeholder="Scrivi la tua consultazione vocazionale..."
+                    rows="1"
+                    maxlength="1500"
+                    [disabled]="isLoading"
+                  ></textarea>
+                </div>
+
+                <div class="action-buttons">
+                  <button
+                    class="clear-button"
+                    (click)="resetChat()"
+                    [disabled]="isLoading"
+                    title="Riavvia conversazione completa"
+                  >
+                    <i class="fas fa-redo"></i>
+                  </button>
+                  <button
+                    class="send-button"
+                    id="send-button"
+                    (click)="sendMessage()"
+                    [disabled]="isLoading || !currentMessage.trim()"
+                  >
+                    <i class="fas fa-paper-plane"></i>
+                    <mat-spinner *ngIf="isLoading" diameter="20"></mat-spinner>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- MODALE DI PAGAMENTO -->
+          <div *ngIf="showPaymentModal" class="payment-modal-overlay">
+            <div class="payment-modal">
+              <div class="payment-header">
+                <h3>🎯 Sblocca Orientamento Vocazionale Illimitato</h3>
+                <button (click)="cancelPayment()" class="close-payment-button">
+                  ✕
+                </button>
+              </div>
+
+              <div class="payment-content">
+                <div class="payment-info">
+                  <p>Prima consultazione vocazionale gratuita completata.</p>
+                  <p>
+                    Per continuare a esplorare il tuo cammino professionale
+                    illimitatamente:
+                  </p>
+                </div>
+
+                <div class="payment-price">
+                  <span class="price-amount">4.00€</span>
+                  <span class="price-description"
+                    >Accesso completo all'orientamento vocazionale</span
+                  >
+                </div>
+
+                <div *ngIf="isProcessingPayment" class="payment-loading">
+                  <div class="loading-spinner"></div>
+                  <p>Preparando il sistema di pagamento...</p>
+                </div>
+
+                <div
+                  id="payment-element-container"
+                  class="payment-element-container"
+                  [hidden]="isProcessingPayment"
+                >
+                  <!-- Stripe Payment Element si monta qui -->
+                </div>
+
+                <div *ngIf="paymentError" class="payment-error">
+                  <span>{{ paymentError }}</span>
+                </div>
+
+                <div class="payment-actions">
+                  <button
+                    (click)="handlePaymentSubmit()"
+                    [disabled]="isProcessingPayment "
+                    class="pay-button"
+                  >
+                    <span *ngIf="!isProcessingPayment"
+                      >💳 Paga e Continua</span
+                    >
+                    <span *ngIf="isProcessingPayment">Elaborazione...</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <app-recolecta-datos
+        *ngIf="showDataModal"
+        (onDataSubmitted)="onUserDataSubmitted($event)"
+        (onModalClosed)="onDataModalClosed()"
+      >
+      </app-recolecta-datos>
+      <app-fortune-wheel
+        [isVisible]="showFortuneWheel"
+        [prizes]="vocationalPrizes"
+        (onPrizeWon)="onPrizeWon($event)"
+        (onWheelClosed)="onWheelClosed()"
+      >
+      </app-fortune-wheel>
+    </div>
+  </body>
+</html>
