@@ -458,7 +458,7 @@ Cosa vorresti esplorare riguardo al tuo spirito animale?`,
 
     try {
       await this.paypalService.initiatePayment({
-        amount: '5.00',
+        amount: '4.00',
         currency: 'EUR',
         serviceName: 'Animale interiore',
         returnPath: '/animale-interiore',

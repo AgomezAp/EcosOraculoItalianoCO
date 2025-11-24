@@ -576,7 +576,7 @@ Quale aspetto del tuo tema natale vuoi esplorare per primo?`,
 
     try {
       await this.paypalService.initiatePayment({
-        amount: '5.00',
+        amount: '4.00',
         currency: 'EUR',
         serviceName: 'Tabella di nascita',
         returnPath: '/tabella-nascita',

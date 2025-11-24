@@ -429,7 +429,7 @@ Sei pronta a scoprire cosa le stelle rivelano sul tuo destino? 🌙`;
     try {
       // Iniciar el flujo de pago de PayPal (redirige al usuario)
       await this.paypalService.initiatePayment({
-        amount: '5.00',
+        amount: '4.00',
         currency: 'EUR',
         serviceName: 'Oroscopo',
         returnPath: '/oroscopo',
