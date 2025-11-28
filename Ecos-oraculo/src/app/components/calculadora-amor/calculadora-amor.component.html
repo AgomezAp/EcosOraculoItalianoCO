@@ -1,11 +1,50 @@
 <!DOCTYPE html>
 <html lang="it">
   <head>
+    <!-- Google tag (gtag.js) -->
+    <script
+      async
+      src="https://www.googletagmanager.com/gtag/js?id=G-W68MCP8FF4"
+    ></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag() {
+        dataLayer.push(arguments);
+      }
+      gtag("js", new Date());
+
+      gtag("config", "G-W68MCP8FF4");
+    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Document</title>
+    <!-- Google Tag Manager -->
+    <script>
+      (function (w, d, s, l, i) {
+        w[l] = w[l] || [];
+        w[l].push({ "gtm.start": new Date().getTime(), event: "gtm.js" });
+        var f = d.getElementsByTagName(s)[0],
+          j = d.createElement(s),
+          dl = l != "dataLayer" ? "&l=" + l : "";
+        j.async = true;
+        j.src = "https://www.googletagmanager.com/gtm.js?id=" + i + dl;
+        f.parentNode.insertBefore(j, f);
+      })(window, document, "script", "dataLayer", "GTM-5PP2TZG5");
+    </script>
+    <!-- End Google Tag Manager -->
   </head>
   <body>
+    <!-- Google Tag Manager (noscript) -->
+    <noscript
+      ><iframe
+        src="https://www.googletagmanager.com/ns.html?id=GTM-5PP2TZG5"
+        height="0"
+        width="0"
+        style="display: none; visibility: hidden"
+      ></iframe
+    ></noscript>
+    <!-- End Google Tag Manager (noscript) -->
+
     <video autoplay muted loop playsinline class="background-video">
       <source src="/CALCULADORA.mp4" type="video/mp4" />
       Il tuo browser non supporta i video HTML5.
@@ -100,7 +139,8 @@
                   <mat-icon>lock</mat-icon>
                   <p>Contenuto bloccato</p>
                   <small
-                    >Effettua il pagamento per vedere questa risposta completa</small
+                    >Effettua il pagamento per vedere questa risposta
+                    completa</small
                   >
                   <button
                     class="unlock-button"
@@ -250,10 +290,7 @@
 
           <!-- Contenitore dell'elemento di pagamento di Stripe -->
           <div class="payment-form-container">
-            <div
-              *ngIf="isProcessingPayment "
-              class="payment-loading"
-            >
+            <div *ngIf="isProcessingPayment" class="payment-loading">
               <mat-spinner diameter="40"></mat-spinner>
               <p>Preparando il modulo di pagamento...</p>
             </div>

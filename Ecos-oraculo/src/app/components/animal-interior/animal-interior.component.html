@@ -1,11 +1,50 @@
 <!DOCTYPE html>
 <html lang="it">
   <head>
+    <!-- Google tag (gtag.js) -->
+    <script
+      async
+      src="https://www.googletagmanager.com/gtag/js?id=G-W68MCP8FF4"
+    ></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag() {
+        dataLayer.push(arguments);
+      }
+      gtag("js", new Date());
+
+      gtag("config", "G-W68MCP8FF4");
+    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Animale Interiore</title>
+    <!-- Google Tag Manager -->
+    <script>
+      (function (w, d, s, l, i) {
+        w[l] = w[l] || [];
+        w[l].push({ "gtm.start": new Date().getTime(), event: "gtm.js" });
+        var f = d.getElementsByTagName(s)[0],
+          j = d.createElement(s),
+          dl = l != "dataLayer" ? "&l=" + l : "";
+        j.async = true;
+        j.src = "https://www.googletagmanager.com/gtm.js?id=" + i + dl;
+        f.parentNode.insertBefore(j, f);
+      })(window, document, "script", "dataLayer", "GTM-5PP2TZG5");
+    </script>
+    <!-- End Google Tag Manager -->
   </head>
   <body>
+    <!-- Google Tag Manager (noscript) -->
+    <noscript
+      ><iframe
+        src="https://www.googletagmanager.com/ns.html?id=GTM-5PP2TZG5"
+        height="0"
+        width="0"
+        style="display: none; visibility: hidden"
+      ></iframe
+    ></noscript>
+    <!-- End Google Tag Manager (noscript) -->
+
     <video autoplay muted loop playsinline class="background-video">
       <source src="/ANIMAL.mp4" type="video/mp4" />
       Il tuo browser non supporta i video HTML5.
@@ -221,10 +260,7 @@
             <p class="price-description">Accesso completo e illimitato</p>
           </div>
 
-          <div
-            *ngIf="isProcessingPayment"
-            class="payment-loading"
-          >
+          <div *ngIf="isProcessingPayment" class="payment-loading">
             <div class="loading-spinner"></div>
             <p>Preparando il pagamento...</p>
           </div>
@@ -234,14 +270,14 @@
           </div>
 
           <div
-            *ngIf="!isProcessingPayment "
+            *ngIf="!isProcessingPayment"
             id="payment-element-container-animal"
             class="payment-element-container"
           ></div>
 
           <div class="payment-actions">
             <button
-              *ngIf="!isProcessingPayment "
+              *ngIf="!isProcessingPayment"
               class="pay-button"
               (click)="handlePaymentSubmit()"
               [disabled]="isProcessingPayment"
