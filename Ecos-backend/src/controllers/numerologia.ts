@@ -28,9 +28,6 @@ export class ChatController {
 
   // ✅ LISTA DEI MODELLI DI BACKUP (in ordine di preferenza)
  private readonly MODELS_FALLBACK = [
-    "gemini-2.5-flash-live",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-preview-09-2025",
     "gemini-2.5-flash-lite",
     "gemini-2.5-flash-lite-preview-09-2025",
     "gemini-2.0-flash",
