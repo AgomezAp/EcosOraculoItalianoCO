@@ -16,11 +16,15 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
-import { InformacionZodiacoService } from '../../services/informacion-zodiaco.service';
+import {
+  InformacionZodiacoService,
+  ZodiacRequest,
+  ZodiacResponse,
+  AstrologerData,
+} from '../../services/informacion-zodiaco.service';
 import { MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
 import { HttpClient } from '@angular/common/http';
 import { PaypalService } from '../../services/paypal.service';
-
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { RecolectaDatosComponent } from '../recolecta-datos/recolecta-datos.component';
 import { Observable, of } from 'rxjs';
@@ -30,46 +34,19 @@ import {
   FortuneWheelComponent,
   Prize,
 } from '../fortune-wheel/fortune-wheel.component';
+
 interface ZodiacMessage {
   content: string;
   isUser: boolean;
   timestamp: Date;
-  sender: string;
+  sender?: string;
+  id?: string;
+  freeMessagesRemaining?: number;
+  showPaywall?: boolean;
+  isCompleteResponse?: boolean;
+  isPrizeAnnouncement?: boolean;
 }
 
-// ✅ Definir AstrologerData según tu servicio
-interface AstrologerData {
-  name: string;
-  title: string;
-  specialty: string;
-  experience: string;
-}
-interface ZodiacRequest {
-  zodiacData: AstrologerData;
-  userMessage: string;
-  conversationHistory?: Array<{
-    role: 'user' | 'astrologer';
-    message: string;
-  }>;
-}
-
-interface ZodiacResponse {
-  success: boolean;
-  response?: string;
-  error?: string;
-  timestamp: string;
-}
-
-interface AstrologerInfo {
-  success: boolean;
-  astrologer: {
-    name: string;
-    title: string;
-    specialty: string;
-    description: string;
-  };
-  timestamp: string;
-}
 @Component({
   selector: 'app-informacion-zodiaco',
   imports: [
@@ -81,7 +58,6 @@ interface AstrologerInfo {
     MatInputModule,
     MatProgressSpinnerModule,
     RecolectaDatosComponent,
-    FortuneWheelComponent,
   ],
   templateUrl: './informacion-zodiaco.component.html',
   styleUrl: './informacion-zodiaco.component.css',
@@ -94,7 +70,7 @@ export class InformacionZodiacoComponent
 
   // Variables principales del chat
   currentMessage: string = '';
-  messages: any[] = [];
+  messages: ZodiacMessage[] = [];
   isLoading = false;
   hasStartedConversation = false;
 
@@ -102,23 +78,27 @@ export class InformacionZodiacoComponent
   private shouldAutoScroll = true;
   private lastMessageCount = 0;
 
+  // Variables para modal de datos
   showDataModal: boolean = false;
   userData: any = null;
 
   // Variables para control de pagos
   showPaymentModal: boolean = false;
-
   clientSecret: string | null = null;
   isProcessingPayment: boolean = false;
   paymentError: string | null = null;
   hasUserPaidForAstrology: boolean = false;
-  firstQuestionAsked: boolean = false;
-  //Configuración de la rueda de la fortuna
+
+  // ✅ NUEVO: Sistema de 3 mensajes gratis
+  private userMessageCount: number = 0;
+  private readonly FREE_MESSAGES_LIMIT = 3;
+
+  // Configuración de la rueda de la fortuna
   showFortuneWheel: boolean = false;
   astralPrizes: Prize[] = [
     {
       id: '1',
-      name: '3 Lanci della Ruota Astrale',
+      name: '3 Giri della Ruota Astrale',
       color: '#4ecdc4',
       icon: '🔮',
     },
@@ -130,23 +110,23 @@ export class InformacionZodiacoComponent
     },
     {
       id: '4',
-      name: 'Riprova ancora!',
+      name: 'Riprova!',
       color: '#ff7675',
       icon: '🌙',
     },
   ];
+
   private wheelTimer: any;
-  // NUEVA PROPIEDAD para controlar mensajes bloqueados
   blockedMessageId: string | null = null;
   private backendUrl = environment.apiUrl;
 
   astrologerInfo = {
     name: 'Maestra Carla',
     title: 'Guardiana delle Stelle',
-    specialty: 'Specialista di Astrologia e Segni Zodiacali',
+    specialty: 'Specialista in Astrologia e Segni Zodiacali',
   };
 
-  // Frases de bienvenida aleatorias
+  // Frasi di benvenuto casuali
   welcomeMessages = [
     'Benvenuta, anima cosmica. Le stelle mi hanno sussurrato del tuo arrivo... Quali segreti dello zodiaco vuoi decifrare oggi?',
     'I pianeti si allineano per accoglierti. Sono la Maestra Carla, interprete dei destini celesti. Su cosa vorresti consultarmi riguardo al tuo segno zodiacale o aspetto celeste?',
@@ -164,9 +144,17 @@ export class InformacionZodiacoComponent
   ) {}
 
   async ngOnInit(): Promise<void> {
+    // Cargar estado de pago
     this.hasUserPaidForAstrology =
       sessionStorage.getItem('hasUserPaidForZodiacInfo_zodiacInfo') === 'true';
 
+    // ✅ NUEVO: Cargar contador de mensajes
+    const savedMessageCount = sessionStorage.getItem('zodiacUserMessageCount');
+    if (savedMessageCount) {
+      this.userMessageCount = parseInt(savedMessageCount, 10);
+    }
+
+    // Verificar pago de PayPal
     const paymentStatus = this.paypalService.checkPaymentStatusFromUrl();
 
     if (paymentStatus && paymentStatus.status === 'COMPLETED') {
@@ -183,16 +171,16 @@ export class InformacionZodiacoComponent
           this.blockedMessageId = null;
           sessionStorage.removeItem('astrologyBlockedMessageId');
 
-          // Clear URL
           window.history.replaceState(
             {},
             document.title,
             window.location.pathname
           );
+
           this.messages.push({
             sender: this.astrologerInfo.name,
             content:
-              '✨ Pagamento confermato! Ora puoi accedere a tutta la mia esperienza.',
+              '✨ Pagamento confermato! Ora puoi accedere a tutta la mia esperienza e saggezza celeste senza limiti.',
             timestamp: new Date(),
             isUser: false,
           });
@@ -200,13 +188,11 @@ export class InformacionZodiacoComponent
           this.cdr.markForCheck();
         }
       } catch (error) {
-        console.error('Error verificando pago de PayPal:', error);
         this.paymentError = 'Errore nella verifica del pagamento';
       }
     }
 
-    // ✅ NUEVO: Cargar datos del usuario desde sessionStorage
-
+    // Cargar datos del usuario desde sessionStorage
     const savedUserData = sessionStorage.getItem('userData');
     if (savedUserData) {
       try {
@@ -218,12 +204,10 @@ export class InformacionZodiacoComponent
       this.userData = null;
     }
 
+    // Cargar mensajes guardados
     const savedMessages = sessionStorage.getItem('astrologyMessages');
-    const savedFirstQuestion = sessionStorage.getItem(
-      'firstAstrologyQuestionAsked'
-    );
     const savedBlockedMessageId = sessionStorage.getItem(
-      'blockedAstrologyMessageId'
+      'astrologyBlockedMessageId'
     );
 
     if (savedMessages) {
@@ -233,7 +217,6 @@ export class InformacionZodiacoComponent
           ...msg,
           timestamp: new Date(msg.timestamp),
         }));
-        this.firstQuestionAsked = savedFirstQuestion === 'true';
         this.blockedMessageId = savedBlockedMessageId || null;
         this.hasStartedConversation = true;
       } catch (error) {
@@ -244,7 +227,7 @@ export class InformacionZodiacoComponent
       this.startConversation();
     }
 
-    // ✅ AGREGAR: Mostrar ruleta si ya hay conversación iniciada
+    // Mostrar ruleta si corresponde
     if (this.hasStartedConversation && FortuneWheelComponent.canShowWheel()) {
       this.showWheelAfterDelay(2000);
     }
@@ -262,6 +245,35 @@ export class InformacionZodiacoComponent
       clearTimeout(this.wheelTimer);
     }
   }
+
+  // ✅ NUEVO: Obtener mensajes gratis restantes
+  getFreeMessagesRemaining(): number {
+    if (this.hasUserPaidForAstrology) {
+      return -1; // Ilimitado
+    }
+    return Math.max(0, this.FREE_MESSAGES_LIMIT - this.userMessageCount);
+  }
+
+  // ✅ NUEVO: Verificar si tiene acceso
+  private hasAccess(): boolean {
+    // Premium = acceso ilimitado
+    if (this.hasUserPaidForAstrology) {
+      return true;
+    }
+
+    // Tiene consultas gratis de la ruleta
+    if (this.hasFreeAstrologyConsultationsAvailable()) {
+      return true;
+    }
+
+    // Dentro del límite de mensajes gratis
+    if (this.userMessageCount < this.FREE_MESSAGES_LIMIT) {
+      return true;
+    }
+
+    return false;
+  }
+
   showWheelAfterDelay(delayMs: number = 3000): void {
     if (this.wheelTimer) {
       clearTimeout(this.wheelTimer);
@@ -275,15 +287,14 @@ export class InformacionZodiacoComponent
       ) {
         this.showFortuneWheel = true;
         this.cdr.markForCheck();
-      } else {
       }
     }, delayMs);
   }
+
   onPrizeWon(prize: Prize): void {
-    // Mostrar mensaje del astrólogo sobre el premio
-    const prizeMessage = {
+    const prizeMessage: ZodiacMessage = {
       isUser: false,
-      content: `🌟 Le energie cosmiche ti hanno benedetto! Hai vinto: **${prize.name}** ${prize.icon}\n\nQuesto dono dell\'universo è stato attivato per te. I segreti dello zodiaco ti saranno rivelati con maggiore chiarezza. Che la fortuna astrale ti accompagni nelle tue prossime consultazioni!`,
+      content: `🌟 Le energie cosmiche ti hanno benedetto! Hai vinto: **${prize.name}** ${prize.icon}\n\nQuesto dono dell'universo è stato attivato per te. I segreti dello zodiaco ti saranno rivelati con maggiore chiarezza. Che la fortuna astrale ti accompagni nelle tue prossime consultazioni!`,
       timestamp: new Date(),
       isPrizeAnnouncement: true,
     };
@@ -292,9 +303,9 @@ export class InformacionZodiacoComponent
     this.shouldAutoScroll = true;
     this.saveMessagesToSession();
 
-    // Procesar el premio
     this.processAstralPrize(prize);
   }
+
   onWheelClosed(): void {
     this.showFortuneWheel = false;
   }
@@ -309,14 +320,15 @@ export class InformacionZodiacoComponent
       this.cdr.markForCheck();
     } else {
       alert(
-        'Du hast keine Würfe verfügbar. ' +
-          FortuneWheelComponent.getSpinStatus()
+        'Non hai giri disponibili. ' + FortuneWheelComponent.getSpinStatus()
       );
     }
   }
+
   getSpinStatus(): string {
     return FortuneWheelComponent.getSpinStatus();
   }
+
   private processAstralPrize(prize: Prize): void {
     switch (prize.id) {
       case '1': // 3 Consultas Gratis
@@ -324,33 +336,29 @@ export class InformacionZodiacoComponent
         break;
       case '2': // 1 Lectura Premium - ACCESO COMPLETO
         this.hasUserPaidForAstrology = true;
-        sessionStorage.setItem('hasUserPaidForAstrology', 'true');
+        sessionStorage.setItem('hasUserPaidForZodiacInfo_zodiacInfo', 'true');
 
-        // Desbloquear cualquier mensaje bloqueado
         if (this.blockedMessageId) {
           this.blockedMessageId = null;
-          sessionStorage.removeItem('blockedAstrologyMessageId');
+          sessionStorage.removeItem('astrologyBlockedMessageId');
         }
 
-        // Agregar mensaje especial para este premio
-
-        const premiumMessage = {
+        const premiumMessage: ZodiacMessage = {
           isUser: false,
           content:
-            "✨ **Hai sbloccato l'accesso Premium completo!** ✨\n\nLe stelle hanno cospitato in modo straordinario per aiutarti. Ora hai accesso illimitato a tutta la conoscenza astrale. Puoi consultarmi sui segni zodiacali, compatibilità, previsioni astrologiche e tutti i segreti celesti tutte le volte che desideri.\n\n🌟 *Le stelle hanno aperto tutte le loro porte cosmiche per te* 🌟",
+            "✨ **Hai sbloccato l'accesso Premium completo!** ✨\n\nLe stelle si sono allineate in modo straordinario per aiutarti. Ora hai accesso illimitato a tutta la conoscenza astrale. Puoi consultare i segni zodiacali, le compatibilità, le previsioni astrologiche e tutti i segreti celesti tutte le volte che desideri.\n\n🌟 *Le stelle hanno aperto tutte le loro porte cosmiche per te* 🌟",
           timestamp: new Date(),
         };
-
         this.messages.push(premiumMessage);
         this.shouldAutoScroll = true;
         this.saveMessagesToSession();
         break;
-      // ✅ ELIMINADO: case '3' - 2 Consultas Extra
       case '4': // Otra oportunidad
         break;
       default:
     }
   }
+
   private addFreeAstrologyConsultations(count: number): void {
     const current = parseInt(
       sessionStorage.getItem('freeAstrologyConsultations') || '0'
@@ -358,11 +366,20 @@ export class InformacionZodiacoComponent
     const newTotal = current + count;
     sessionStorage.setItem('freeAstrologyConsultations', newTotal.toString());
 
-    // Si había un mensaje bloqueado, desbloquearlo
     if (this.blockedMessageId && !this.hasUserPaidForAstrology) {
       this.blockedMessageId = null;
-      sessionStorage.removeItem('blockedAstrologyMessageId');
+      sessionStorage.removeItem('astrologyBlockedMessageId');
     }
+
+    // Mensaje informativo
+    const infoMessage: ZodiacMessage = {
+      isUser: false,
+      content: `✨ *Hai ricevuto ${count} consultazioni astrali gratuite* ✨\n\nOra hai **${newTotal}** consultazioni disponibili per esplorare i misteri dello zodiaco.`,
+      timestamp: new Date(),
+    };
+    this.messages.push(infoMessage);
+    this.shouldAutoScroll = true;
+    this.saveMessagesToSession();
   }
 
   private hasFreeAstrologyConsultationsAvailable(): boolean {
@@ -383,8 +400,8 @@ export class InformacionZodiacoComponent
         'freeAstrologyConsultations',
         remaining.toString()
       );
-      // Mostrar mensaje informativo
-      const prizeMsg = {
+
+      const prizeMsg: ZodiacMessage = {
         isUser: false,
         content: `✨ *Hai utilizzato una consultazione astrale gratuita* ✨\n\nTi rimangono **${remaining}** consultazioni astrali gratuite.`,
         timestamp: new Date(),
@@ -417,7 +434,7 @@ export class InformacionZodiacoComponent
           Math.floor(Math.random() * this.welcomeMessages.length)
         ];
 
-      const welcomeMessage = {
+      const welcomeMessage: ZodiacMessage = {
         isUser: false,
         content: randomWelcome,
         timestamp: new Date(),
@@ -427,105 +444,124 @@ export class InformacionZodiacoComponent
     }
     this.hasStartedConversation = true;
 
-    // ✅ AGREGAR VERIFICACIÓN DE RULETA
     if (FortuneWheelComponent.canShowWheel()) {
       this.showWheelAfterDelay(3000);
-    } else {
     }
   }
 
+  // ✅ MODIFICADO: sendMessage() con sistema de 3 mensajes gratis
   sendMessage(): void {
     if (this.currentMessage?.trim() && !this.isLoading) {
       const userMessage = this.currentMessage.trim();
 
-      // ✅ NUEVA LÓGICA: Verificar consultas gratuitas ANTES de verificar pago
-      if (!this.hasUserPaidForAstrology && this.firstQuestionAsked) {
-        // Verificar si tiene consultas astrales gratis disponibles
-        if (this.hasFreeAstrologyConsultationsAvailable()) {
-          this.useFreeAstrologyConsultation();
-          // Continuar con el mensaje sin bloquear
-        } else {
-          // Si no tiene consultas gratis, mostrar modal de datos
+      // Calcular el próximo número de mensaje
+      const nextMessageCount = this.userMessageCount + 1;
 
-          // Cerrar otros modales primero
-          this.showFortuneWheel = false;
-          this.showPaymentModal = false;
+      console.log(
+        `📊 Messaggio #${nextMessageCount}, Premium: ${this.hasUserPaidForAstrology}, Limite: ${this.FREE_MESSAGES_LIMIT}`
+      );
 
-          // Guardar el mensaje para procesarlo después del pago
-          sessionStorage.setItem('pendingAstrologyMessage', userMessage);
+      // ✅ Verificar acceso
+      const canSendMessage =
+        this.hasUserPaidForAstrology ||
+        this.hasFreeAstrologyConsultationsAvailable() ||
+        nextMessageCount <= this.FREE_MESSAGES_LIMIT;
 
-          this.saveStateBeforePayment();
+      if (!canSendMessage) {
+        console.log('❌ Senza accesso - mostrando modal di pagamento');
 
-          // Mostrar modal de datos con timeout
-          setTimeout(() => {
-            this.showDataModal = true;
-            this.cdr.markForCheck();
-          }, 100);
+        // Cerrar otros modales
+        this.showFortuneWheel = false;
+        this.showPaymentModal = false;
 
-          return; // Salir aquí para no procesar el mensaje aún
-        }
+        // Guardar mensaje pendiente
+        sessionStorage.setItem('pendingAstrologyMessage', userMessage);
+        this.saveStateBeforePayment();
+
+        // Mostrar modal de datos
+        setTimeout(() => {
+          this.showDataModal = true;
+          this.cdr.markForCheck();
+        }, 100);
+
+        return;
+      }
+
+      // ✅ Si usa consulta gratis de ruleta (después de los 3 gratis)
+      if (
+        !this.hasUserPaidForAstrology &&
+        nextMessageCount > this.FREE_MESSAGES_LIMIT &&
+        this.hasFreeAstrologyConsultationsAvailable()
+      ) {
+        this.useFreeAstrologyConsultation();
       }
 
       this.shouldAutoScroll = true;
-
-      // Procesar mensaje normalmente
-      this.processUserMessage(userMessage);
+      this.processUserMessage(userMessage, nextMessageCount);
     }
   }
 
-  // ✅ NUEVO: Separar lógica de procesamiento de mensajes
-  private processUserMessage(userMessage: string): void {
-    const userMsg = {
+  // ✅ MODIFICADO: processUserMessage() para enviar messageCount al backend
+  private processUserMessage(userMessage: string, messageCount: number): void {
+    // Agregar mensaje del usuario
+    const userMsg: ZodiacMessage = {
       isUser: true,
       content: userMessage,
       timestamp: new Date(),
     };
     this.messages.push(userMsg);
 
+    // ✅ Actualizar contador
+    this.userMessageCount = messageCount;
+    sessionStorage.setItem(
+      'zodiacUserMessageCount',
+      this.userMessageCount.toString()
+    );
+
     this.saveMessagesToSession();
     this.currentMessage = '';
     this.isLoading = true;
+    this.cdr.markForCheck();
 
-    this.generateAstrologyResponse(userMessage).subscribe({
-      next: (response: any) => {
+    // ✅ Generar respuesta con messageCount
+    this.generateAstrologyResponse(userMessage, messageCount).subscribe({
+      next: (response: ZodiacResponse) => {
         this.isLoading = false;
 
         const messageId = Date.now().toString();
-        const astrologerMsg = {
+        const astrologerMsg: ZodiacMessage = {
           isUser: false,
-          content: response,
+          content: response.response || '',
           timestamp: new Date(),
           id: messageId,
+          freeMessagesRemaining: response.freeMessagesRemaining,
+          showPaywall: response.showPaywall,
+          isCompleteResponse: response.isCompleteResponse,
         };
         this.messages.push(astrologerMsg);
 
         this.shouldAutoScroll = true;
 
-        // ✅ LÓGICA MODIFICADA: Solo bloquear si no tiene consultas gratis Y no ha pagado
-        if (
-          this.firstQuestionAsked &&
-          !this.hasUserPaidForAstrology &&
-          !this.hasFreeAstrologyConsultationsAvailable()
-        ) {
+        console.log(
+          `📊 Risposta - Messaggi rimanenti: ${response.freeMessagesRemaining}, Paywall: ${response.showPaywall}, Completa: ${response.isCompleteResponse}`
+        );
+
+        // ✅ Mostrar paywall si el backend lo indica
+        if (response.showPaywall && !this.hasUserPaidForAstrology) {
           this.blockedMessageId = messageId;
-          sessionStorage.setItem('blockedAstrologyMessageId', messageId);
+          sessionStorage.setItem('astrologyBlockedMessageId', messageId);
 
           setTimeout(() => {
             this.saveStateBeforePayment();
 
-            // Cerrar otros modales
             this.showFortuneWheel = false;
             this.showPaymentModal = false;
 
-            // Mostrar modal de datos
             setTimeout(() => {
               this.showDataModal = true;
               this.cdr.markForCheck();
             }, 100);
-          }, 2000);
-        } else if (!this.firstQuestionAsked) {
-          this.firstQuestionAsked = true;
-          sessionStorage.setItem('firstAstrologyQuestionAsked', 'true');
+          }, 2500);
         }
 
         this.saveMessagesToSession();
@@ -533,11 +569,12 @@ export class InformacionZodiacoComponent
       },
       error: (error: any) => {
         this.isLoading = false;
+        console.error('Errore nella risposta:', error);
 
-        const errorMsg = {
+        const errorMsg: ZodiacMessage = {
           isUser: false,
           content:
-            '🌟 Mi dispiace, le energie cosmiche sono temporaneamente disturbate. Per favore riprova tra qualche istante.',
+            '🌟 Mi dispiace, le energie cosmiche sono temporaneamente disturbate. Per favore, riprova tra qualche istante.',
           timestamp: new Date(),
         };
         this.messages.push(errorMsg);
@@ -546,10 +583,19 @@ export class InformacionZodiacoComponent
       },
     });
   }
-  private generateAstrologyResponse(userMessage: string): Observable<string> {
-    // Crear el historial de conversación para el contexto
+
+  // ✅ MODIFICADO: generateAstrologyResponse() para incluir messageCount y isPremiumUser
+  private generateAstrologyResponse(
+    userMessage: string,
+    messageCount: number
+  ): Observable<ZodiacResponse> {
+    // Crear historial de conversación
     const conversationHistory = this.messages
-      .filter((msg) => msg.content && msg.content.trim() !== '')
+      .filter(
+        (msg) =>
+          msg.content && msg.content.trim() !== '' && !msg.isPrizeAnnouncement
+      )
+      .slice(-10) // Últimos 10 mensajes para contexto
       .map((msg) => ({
         role: msg.isUser ? ('user' as const) : ('astrologer' as const),
         message: msg.content,
@@ -564,26 +610,47 @@ export class InformacionZodiacoComponent
         "Secoli di esperienza nell'interpretazione dei destini celesti e dell'influenza delle stelle",
     };
 
-    // ✅ Crear la solicitud con 'zodiacData' en lugar de 'astrologerData'
+    // ✅ Request con messageCount y isPremiumUser
     const request: ZodiacRequest = {
-      zodiacData: astrologerData, // ✅ Cambiar aquí
+      zodiacData: astrologerData,
       userMessage,
       conversationHistory,
+      messageCount: messageCount,
+      isPremiumUser: this.hasUserPaidForAstrology,
     };
 
-    // Llamar al servicio y transformar la respuesta
+    console.log('📤 Invio request:', {
+      messageCount: request.messageCount,
+      isPremiumUser: request.isPremiumUser,
+      userMessage: request.userMessage.substring(0, 50) + '...',
+    });
+
     return this.zodiacoService.chatWithAstrologer(request).pipe(
       map((response: ZodiacResponse) => {
-        if (response.success && response.response) {
-          return response.response;
+        console.log('📥 Risposta ricevuta:', {
+          success: response.success,
+          freeMessagesRemaining: response.freeMessagesRemaining,
+          showPaywall: response.showPaywall,
+          isCompleteResponse: response.isCompleteResponse,
+        });
+
+        if (response.success) {
+          return response;
         } else {
           throw new Error(response.error || 'Errore sconosciuto del servizio');
         }
       }),
       catchError((error: any) => {
-        return of(
-          '🌟 Le stelle sono temporaneamente nuvolose. Le stelle mi sussurrano che devo ricaricare le mie energie cosmiche. Per favore riprova tra qualche istante.'
-        );
+        console.error('Errore in generateAstrologyResponse:', error);
+        return of({
+          success: true,
+          response:
+            '🌟 Le stelle sono temporaneamente nuvolose. Per favore, riprova tra qualche istante.',
+          timestamp: new Date().toISOString(),
+          freeMessagesRemaining: this.getFreeMessagesRemaining(),
+          showPaywall: false,
+          isCompleteResponse: true,
+        });
       })
     );
   }
@@ -591,12 +658,12 @@ export class InformacionZodiacoComponent
   private saveStateBeforePayment(): void {
     this.saveMessagesToSession();
     sessionStorage.setItem(
-      'firstAstrologyQuestionAsked',
-      this.firstQuestionAsked.toString()
+      'zodiacUserMessageCount',
+      this.userMessageCount.toString()
     );
     if (this.blockedMessageId) {
       sessionStorage.setItem(
-        'blockedAstrologyMessageId',
+        'astrologyBlockedMessageId',
         this.blockedMessageId
       );
     }
@@ -615,14 +682,19 @@ export class InformacionZodiacoComponent
         'astrologyMessages',
         JSON.stringify(messagesToSave)
       );
-    } catch (error) {}
+    } catch (error) {
+      console.error('Errore nel salvataggio dei messaggi:', error);
+    }
   }
 
+  // ✅ MODIFICADO: clearSessionData() incluyendo contador
   private clearSessionData(): void {
-    sessionStorage.removeItem('hasUserPaidForAstrology');
+    sessionStorage.removeItem('hasUserPaidForZodiacInfo_zodiacInfo');
     sessionStorage.removeItem('astrologyMessages');
-    sessionStorage.removeItem('firstAstrologyQuestionAsked');
-    sessionStorage.removeItem('blockedAstrologyMessageId');
+    sessionStorage.removeItem('astrologyBlockedMessageId');
+    sessionStorage.removeItem('zodiacUserMessageCount');
+    sessionStorage.removeItem('freeAstrologyConsultations');
+    sessionStorage.removeItem('pendingAstrologyMessage');
   }
 
   isMessageBlocked(message: any): boolean {
@@ -651,22 +723,22 @@ export class InformacionZodiacoComponent
 
     if (!this.userData) {
       this.paymentError =
-        'Dati del cliente non trovati. Per favore compila prima il modulo.';
+        'Dati del cliente non trovati. Per favore, compila prima il modulo.';
+      this.showPaymentModal = false;
       this.showDataModal = true;
       this.cdr.markForCheck();
       return;
     }
 
     const email = this.userData.email?.toString().trim();
-
     if (!email) {
-      this.paymentError = 'Email richiesta. Per favore compila il modulo.';
+      this.paymentError = 'Email richiesta. Per favore, compila il modulo.';
+      this.showPaymentModal = false;
       this.showDataModal = true;
       this.cdr.markForCheck();
       return;
     }
 
-    // Guardar mensaje pendiente si existe
     if (this.currentMessage) {
       sessionStorage.setItem('pendingZodiacInfoMessage', this.currentMessage);
     }
@@ -681,7 +753,7 @@ export class InformacionZodiacoComponent
       await this.paypalService.initiatePayment({
         amount: '4.00',
         currency: 'EUR',
-        serviceName: 'Zodiaco Informazione',
+        serviceName: 'Informazioni Zodiacali Premium',
         returnPath: '/informazione-zodiaco',
         cancelPath: '/informazione-zodiaco',
       });
@@ -700,19 +772,20 @@ export class InformacionZodiacoComponent
     this.cdr.markForCheck();
   }
 
+  // ✅ MODIFICADO: clearConversation() reseteando contador
   clearConversation(): void {
     this.shouldAutoScroll = true;
     this.lastMessageCount = 0;
 
     if (!this.hasUserPaidForAstrology) {
-      this.firstQuestionAsked = false;
+      this.userMessageCount = 0;
       this.blockedMessageId = null;
       this.clearSessionData();
     } else {
       sessionStorage.removeItem('astrologyMessages');
-      sessionStorage.removeItem('firstAstrologyQuestionAsked');
-      sessionStorage.removeItem('blockedAstrologyMessageId');
-      this.firstQuestionAsked = false;
+      sessionStorage.removeItem('astrologyBlockedMessageId');
+      sessionStorage.removeItem('zodiacUserMessageCount');
+      this.userMessageCount = 0;
       this.blockedMessageId = null;
     }
 
@@ -737,21 +810,22 @@ export class InformacionZodiacoComponent
       }
     } catch (err) {}
   }
+
   formatMessage(content: string): string {
     if (!content) return '';
 
     let formattedContent = content;
 
-    // Convertir **texto** a <strong>texto</strong> para negrilla
+    // Convertir **texto** a <strong>texto</strong>
     formattedContent = formattedContent.replace(
       /\*\*(.*?)\*\*/g,
       '<strong>$1</strong>'
     );
 
-    // Convertir saltos de línea a <br> para mejor visualización
+    // Convertir saltos de línea a <br>
     formattedContent = formattedContent.replace(/\n/g, '<br>');
 
-    // Opcional: También puedes manejar *texto* (una sola asterisco) como cursiva
+    // Convertir *texto* a cursiva
     formattedContent = formattedContent.replace(
       /(?<!\*)\*([^*\n]+)\*(?!\*)/g,
       '<em>$1</em>'
@@ -761,55 +835,52 @@ export class InformacionZodiacoComponent
   }
 
   onUserDataSubmitted(userData: any): void {
-    // ✅ VALIDAR CAMPOS CRÍTICOS ANTES DE PROCEDER
-    const requiredFields = ['email']; // ❌ QUITADO 'apellido'
+    const requiredFields = ['email'];
     const missingFields = requiredFields.filter(
       (field) => !userData[field] || userData[field].toString().trim() === ''
     );
 
     if (missingFields.length > 0) {
       alert(
-        `Per procedere con il pagamento, devi compilare quanto segue: ${missingFields.join(
+        `Per procedere con il pagamento, devi completare: ${missingFields.join(
           ', '
         )}`
       );
-      this.showDataModal = true; // Mantener modal abierto
+      this.showDataModal = true;
       this.cdr.markForCheck();
       return;
     }
 
-    // ✅ LIMPIAR Y GUARDAR datos INMEDIATAMENTE en memoria Y sessionStorage
     this.userData = {
       ...userData,
       email: userData.email?.toString().trim(),
     };
 
-    // ✅ GUARDAR EN sessionStorage INMEDIATAMENTE
     try {
       sessionStorage.setItem('userData', JSON.stringify(this.userData));
-
-      // Verificar que se guardaron correctamente
-      const verificacion = sessionStorage.getItem('userData');
-    } catch (error) {}
+    } catch (error) {
+      console.error('Errore nel salvataggio userData:', error);
+    }
 
     this.showDataModal = false;
     this.cdr.markForCheck();
 
-    // ✅ NUEVO: Enviar datos al backend como en otros componentes
     this.sendUserDataToBackend(userData);
   }
+
   private sendUserDataToBackend(userData: any): void {
     this.http.post(`${this.backendUrl}api/recolecta`, userData).subscribe({
       next: (response) => {
-        // ✅ LLAMAR A promptForPayment QUE INICIALIZA STRIPE
+        console.log('Dati inviati al backend:', response);
         this.promptForPayment();
       },
       error: (error) => {
-        // ✅ AUN ASÍ ABRIR EL MODAL DE PAGO
+        console.error("Errore nell'invio dei dati:", error);
         this.promptForPayment();
       },
     });
   }
+
   onDataModalClosed(): void {
     this.showDataModal = false;
     this.cdr.markForCheck();

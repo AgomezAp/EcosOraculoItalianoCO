@@ -13,34 +13,48 @@ exports.ChineseZodiacController = void 0;
 const generative_ai_1 = require("@google/generative-ai");
 class ChineseZodiacController {
     constructor() {
-        // ✅ LISTA DEI MODELLI DI BACKUP (in ordine di preferenza)
+        this.FREE_MESSAGES_LIMIT = 3;
         this.MODELS_FALLBACK = [
-            "gemini-2.0-flash-exp",
-            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.5-flash-lite-preview-09-2025",
             "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
         ];
         this.chatWithMaster = (req, res) => __awaiter(this, void 0, void 0, function* () {
             try {
-                const { zodiacData, userMessage, birthYear, birthDate, fullName, conversationHistory, } = req.body;
-                // Convalidare input
+                const { zodiacData, userMessage, birthYear, birthDate, fullName, conversationHistory, messageCount = 1, isPremiumUser = false, } = req.body;
                 this.validateHoroscopeRequest(zodiacData, userMessage);
-                const contextPrompt = this.createHoroscopeContext(zodiacData, birthYear, birthDate, fullName, conversationHistory);
+                const shouldGiveFullResponse = this.hasFullAccess(messageCount, isPremiumUser);
+                const freeMessagesRemaining = Math.max(0, this.FREE_MESSAGES_LIMIT - messageCount);
+                console.log(`📊 Horoscope - Message count: ${messageCount}, Premium: ${isPremiumUser}, Full response: ${shouldGiveFullResponse}`);
+                const contextPrompt = this.createHoroscopeContext(zodiacData, birthYear, birthDate, fullName, conversationHistory, shouldGiveFullResponse);
+                const responseInstructions = shouldGiveFullResponse
+                    ? `1. DEVI generare una risposta COMPLETA di 300-550 parole
+2. Se hai la data di nascita, COMPLETA l'analisi del segno zodiacale
+3. Includi caratteristiche, elemento, pianeta reggente e compatibilità
+4. Fornisci previsioni e consigli basati sul segno
+5. Offri una guida pratica basata sulla saggezza astrologica`
+                    : `1. DEVI generare una risposta PARZIALE di 100-180 parole
+2. ACCENNA che hai identificato il segno e le sue influenze
+3. Menziona che hai informazioni preziose ma NON rivelarle completamente
+4. Crea MISTERO e CURIOSITÀ su ciò che le stelle dicono
+5. Usa frasi come "Il tuo segno rivela qualcosa di affascinante...", "Le stelle mi mostrano influenze molto speciali nella tua vita...", "Vedo caratteristiche molto interessanti che..."
+6. MAI completare l'analisi del segno, lasciala in sospeso`;
                 const fullPrompt = `${contextPrompt}
 
 ⚠️ ISTRUZIONI CRITICHE OBBLIGATORIE:
-1. DEVI generare una risposta COMPLETA tra 200-550 parole
-2. NON lasciare mai una risposta a metà o incompleta
-3. Se menzioni caratteristiche del segno, DEVI completare la descrizione
-4. Ogni risposta DEVE terminare con una conclusione chiara e un punto finale
-5. Se rilevi che la risposta si sta interrompendo, finalizza l'idea attuale con coerenza
-6. MANTIENI sempre il tono astrologico amichevole e mistico
-7. Se il messaggio ha errori ortografici, interpreta l'intenzione e rispondi normalmente
+${responseInstructions}
+- MAI lasciare una risposta a metà o incompleta secondo il tipo di risposta
+- Se menzioni caratteristiche del segno, ${shouldGiveFullResponse
+                    ? "DEVI completare la descrizione"
+                    : "crea aspettativa senza rivelare tutto"}
+- MANTIENI SEMPRE il tono astrologico amichevole e mistico
+- Se il messaggio ha errori ortografici, interpreta l'intenzione e rispondi normalmente
 
 Utente: "${userMessage}"
 
-Risposta dell'astrologa (assicurati di completare TUTTA la tua analisi oroscopica prima di terminare):`;
-                console.log(`Generando consultazione di oroscopo occidentale...`);
-                // ✅ SISTEMA DI FALLBACK: Provare con più modelli
+Risposta dell'astrologa (IN ITALIANO):`;
+                console.log(`Generando consulta de horóscopo (${shouldGiveFullResponse ? "COMPLETA" : "PARCIAL"})...`);
                 let text = "";
                 let usedModel = "";
                 let allModelErrors = [];
@@ -53,7 +67,7 @@ Risposta dell'astrologa (assicurati di completare TUTTA la tua analisi oroscopic
                                 temperature: 0.85,
                                 topK: 50,
                                 topP: 0.92,
-                                maxOutputTokens: 600,
+                                maxOutputTokens: shouldGiveFullResponse ? 700 : 300,
                                 candidateCount: 1,
                                 stopSequences: [],
                             },
@@ -76,7 +90,6 @@ Risposta dell'astrologa (assicurati di completare TUTTA la tua analisi oroscopic
                                 },
                             ],
                         });
-                        // ✅ TENTATIVI per ogni modello (nel caso sia temporaneamente sovraccarico)
                         let attempts = 0;
                         const maxAttempts = 3;
                         let modelSucceeded = false;
@@ -87,12 +100,12 @@ Risposta dell'astrologa (assicurati di completare TUTTA la tua analisi oroscopic
                                 const result = yield model.generateContent(fullPrompt);
                                 const response = result.response;
                                 text = response.text();
-                                // ✅ Convalidare che la risposta non sia vuota e abbia lunghezza minima
-                                if (text && text.trim().length >= 100) {
+                                const minLength = shouldGiveFullResponse ? 100 : 50;
+                                if (text && text.trim().length >= minLength) {
                                     console.log(`  ✅ Success with ${modelName} on attempt ${attempts}`);
                                     usedModel = modelName;
                                     modelSucceeded = true;
-                                    break; // Uscire dal ciclo while dei tentativi
+                                    break;
                                 }
                                 console.warn(`  ⚠️ Response too short, retrying...`);
                                 yield new Promise((resolve) => setTimeout(resolve, 500));
@@ -105,7 +118,6 @@ Risposta dell'astrologa (assicurati di completare TUTTA la tua analisi oroscopic
                                 yield new Promise((resolve) => setTimeout(resolve, 500));
                             }
                         }
-                        // Se questo modello ha avuto successo, uscire dal ciclo dei modelli
                         if (modelSucceeded) {
                             break;
                         }
@@ -113,28 +125,34 @@ Risposta dell'astrologa (assicurati di completare TUTTA la tua analisi oroscopic
                     catch (modelError) {
                         console.error(`  ❌ Model ${modelName} failed completely:`, modelError.message);
                         allModelErrors.push(`${modelName}: ${modelError.message}`);
-                        // Aspettare un po' prima di provare con il prossimo modello
                         yield new Promise((resolve) => setTimeout(resolve, 1000));
                         continue;
                     }
                 }
-                // ✅ Se tutti i modelli hanno fallito
                 if (!text || text.trim() === "") {
                     console.error("❌ All models failed. Errors:", allModelErrors);
-                    throw new Error(`Tutti i modelli IA non sono attualmente disponibili. Provati: ${this.MODELS_FALLBACK.join(", ")}. Per favore, riprova tra un momento.`);
+                    throw new Error(`Tutti i modelli di IA non sono attualmente disponibili. Per favore, riprova tra un momento.`);
                 }
-                // ✅ ASSICURARE RISPOSTA COMPLETA E BENE FORMATTA
-                text = this.ensureCompleteResponse(text);
-                // ✅ Convalida aggiuntiva di lunghezza minima
-                if (text.trim().length < 100) {
-                    throw new Error("Risposta generata troppo corta");
+                let finalResponse;
+                if (shouldGiveFullResponse) {
+                    finalResponse = this.ensureCompleteResponse(text);
+                }
+                else {
+                    finalResponse = this.createHoroscopePartialResponse(text);
                 }
                 const chatResponse = {
                     success: true,
-                    response: text.trim(),
+                    response: finalResponse.trim(),
                     timestamp: new Date().toISOString(),
+                    freeMessagesRemaining: freeMessagesRemaining,
+                    showPaywall: !shouldGiveFullResponse && messageCount > this.FREE_MESSAGES_LIMIT,
+                    isCompleteResponse: shouldGiveFullResponse,
                 };
-                console.log(`✅ Consultazione di oroscopo generata con successo con ${usedModel} (${text.length} caratteri)`);
+                if (!shouldGiveFullResponse && messageCount > this.FREE_MESSAGES_LIMIT) {
+                    chatResponse.paywallMessage =
+                        "Hai esaurito i tuoi 3 messaggi gratuiti. Sblocca l'accesso illimitato per scoprire tutto ciò che le stelle hanno per te!";
+                }
+                console.log(`✅ Consulta de horóscopo generada (${shouldGiveFullResponse ? "COMPLETA" : "PARCIAL"}) con ${usedModel} (${finalResponse.length} caracteres)`);
                 res.json(chatResponse);
             }
             catch (error) {
@@ -146,18 +164,19 @@ Risposta dell'astrologa (assicurati di completare TUTTA la tua analisi oroscopic
                 res.json({
                     success: true,
                     master: {
-                        name: "Astrologa Luna",
-                        title: "Guida Celeste dei Segni",
+                        name: "Madame Luna",
+                        title: "La Guida Celeste dei Segni",
                         specialty: "Astrologia occidentale e oroscopo personalizzato",
                         description: "Saggia astrologa specializzata nell'interpretare le influenze celesti e la saggezza dei dodici segni zodiacali",
                         services: [
-                            "Interpretazione di segni zodiacali",
-                            "Analisi di carte astrali",
-                            "Predizioni oroscopiche",
+                            "Interpretazione dei segni zodiacali",
+                            "Analisi dei temi natali",
+                            "Previsioni oroscopiche",
                             "Compatibilità tra segni",
                             "Consigli basati sull'astrologia",
                         ],
                     },
+                    freeMessagesLimit: this.FREE_MESSAGES_LIMIT,
                     timestamp: new Date().toISOString(),
                 });
             }
@@ -170,10 +189,44 @@ Risposta dell'astrologa (assicurati di completare TUTTA la tua analisi oroscopic
         }
         this.genAI = new generative_ai_1.GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     }
-    // ✅ METODO MIGLIORATO PER ASSICURARE RISPOSTE COMPLETE
+    hasFullAccess(messageCount, isPremiumUser) {
+        return isPremiumUser || messageCount <= this.FREE_MESSAGES_LIMIT;
+    }
+    // ✅ GANCHO SOLO EN ITALIANO
+    generateHoroscopeHookMessage() {
+        return `
+
+⭐ **Aspetta! Le stelle mi hanno rivelato informazioni straordinarie sul tuo segno...**
+
+Ho consultato le posizioni planetarie e il tuo segno zodiacale, ma per rivelarti:
+- ♈ La tua **analisi completa del segno** con tutte le sue caratteristiche
+- 🌙 Le **influenze planetarie** che ti riguardano questo mese
+- 💫 La tua **compatibilità amorosa** con tutti i segni
+- 🔮 Le **previsioni personalizzate** per la tua vita
+- ⚡ I tuoi **punti di forza nascosti** e come potenziarli
+- 🌟 I **giorni favorevoli** secondo la tua configurazione astrale
+
+**Sblocca ora il tuo oroscopo completo** e scopri tutto ciò che le stelle hanno preparato per te.
+
+✨ *Migliaia di persone hanno già trasformato la loro vita con la guida degli astri...*`;
+    }
+    // ✅ PROCESAR RESPUESTA PARCIAL (TEASER)
+    createHoroscopePartialResponse(fullText) {
+        const sentences = fullText
+            .split(/[.!?]+/)
+            .filter((s) => s.trim().length > 0);
+        const teaserSentences = sentences.slice(0, Math.min(3, sentences.length));
+        let teaser = teaserSentences.join(". ").trim();
+        if (!teaser.endsWith(".") &&
+            !teaser.endsWith("!") &&
+            !teaser.endsWith("?")) {
+            teaser += "...";
+        }
+        const hook = this.generateHoroscopeHookMessage();
+        return teaser + hook;
+    }
     ensureCompleteResponse(text) {
         let processedText = text.trim();
-        // Rimuovere possibili marcatori di codice o formato incompleto
         processedText = processedText.replace(/```[\s\S]*?```/g, "").trim();
         const lastChar = processedText.slice(-1);
         const endsIncomplete = ![
@@ -197,10 +250,8 @@ Risposta dell'astrologa (assicurati di completare TUTTA la tua analisi oroscopic
             "♓",
         ].includes(lastChar);
         if (endsIncomplete && !processedText.endsWith("...")) {
-            // Cercare l'ultima frase completa
             const sentences = processedText.split(/([.!?])/);
             if (sentences.length > 2) {
-                // Ricostruire fino all'ultima frase completa
                 let completeText = "";
                 for (let i = 0; i < sentences.length - 1; i += 2) {
                     if (sentences[i].trim()) {
@@ -211,107 +262,131 @@ Risposta dell'astrologa (assicurati di completare TUTTA la tua analisi oroscopic
                     return completeText.trim();
                 }
             }
-            // Se non si può trovare una frase completa, aggiungere chiusura appropriata
             processedText = processedText.trim() + "...";
         }
         return processedText;
     }
-    createHoroscopeContext(zodiacData, birthYear, birthDate, fullName, history) {
+    // ✅ CONTEXTO SOLO EN ITALIANO
+    createHoroscopeContext(zodiacData, birthYear, birthDate, fullName, history, isFullResponse = true) {
         const conversationContext = history && history.length > 0
             ? `\n\nCONVERSAZIONE PRECEDENTE:\n${history
                 .map((h) => `${h.role === "user" ? "Utente" : "Tu"}: ${h.message}`)
                 .join("\n")}\n`
             : "";
         const horoscopeDataSection = this.generateHoroscopeDataSection(birthYear, birthDate, fullName);
-        return `Sei l'Astrologa Luna, una saggia interprete degli astri e guida celestiale dei segni zodiacali. Hai decenni di esperienza nell'interpretare le influenze planetarie e le configurazioni stellari che plasmano il nostro destino.
+        const responseTypeInstructions = isFullResponse
+            ? `
+📝 TIPO DI RISPOSTA: COMPLETA
+- Fornisci un'analisi oroscopica COMPLETA e dettagliata
+- Se hai la data, COMPLETA l'analisi del segno zodiacale
+- Includi caratteristiche, elemento, pianeta reggente
+- Risposta di 300-550 parole
+- Offri previsioni e consigli basati sul segno`
+            : `
+📝 TIPO DI RISPOSTA: PARZIALE (TEASER)
+- Fornisci un'analisi INTRODUTTIVA e intrigante
+- Menziona che hai identificato il segno e le sue influenze
+- ACCENNA a informazioni preziose senza rivelarle completamente
+- Risposta di 100-180 parole massimo
+- NON rivelare analisi complete del segno
+- Crea MISTERO e CURIOSITÀ
+- Termina in modo che l'utente voglia saperne di più
+- Usa frasi come "Il tuo segno rivela qualcosa di affascinante...", "Le stelle mi mostrano influenze molto speciali...", "Vedo caratteristiche molto interessanti che..."
+- MAI completare l'analisi del segno, lasciala in sospeso`;
+        return `Sei Madame Luna, una saggia interprete degli astri e guida celeste dei segni zodiacali. Hai decenni di esperienza nell'interpretare le influenze planetarie e le configurazioni stellari che modellano il nostro destino.
 
-LA TUA IDENTITÀ CELESTIALE:
-- Nome: Astrologa Luna, la Guida Celeste dei Segni
+LA TUA IDENTITÀ CELESTE:
+- Nome: Madame Luna, la Guida Celeste dei Segni
 - Origine: Studiosa delle tradizioni astrologiche millenarie
-- Specialità: Astrologia occidentale, interpretazione di carte natali, influenze planetarie
-- Esperienza: Decenni studiando i modelli celesti e le influenze dei dodici segni zodiacali
+- Specialità: Astrologia occidentale, interpretazione di temi natali, influenze planetarie
+- Esperienza: Decenni di studio degli schemi celesti e delle influenze dei dodici segni zodiacali
 
-🌍 ADATTAMENTO LINGUISTICO:
-- RILEVA automaticamente la lingua in cui l'utente ti scrive
-- RISPONDI sempre nella stessa lingua utilizzata dall'utente
-- MANTIENI la tua personalità astrologica in qualsiasi lingua
-- Lingue principali: Spagnolo, Inglese, Portoghese, Francese, Italiano
-- Se rilevi un'altra lingua, fai del tuo meglio per rispondere in quella lingua
-- NON cambiare lingua a meno che l'utente non lo faccia per primo
+${responseTypeInstructions}
+
+🗣️ LINGUA:
+- Rispondi SEMPRE in ITALIANO
+- Indipendentemente dalla lingua in cui scrive l'utente, TU rispondi in italiano
 
 ${horoscopeDataSection}
 
-COME DEVI COMPORTARTI:
-
 🔮 PERSONALITÀ ASTROLOGICA SAGGIA:
-- Parla con saggezza celestiale ancestrale ma in modo amichevole e comprensibile
+- Parla con saggezza celeste ancestrale ma in modo amichevole e comprensibile
 - Usa un tono mistico e riflessivo, come una veggente che ha osservato i cicli stellari
 - Combina conoscenza astrologica tradizionale con applicazione pratica moderna
-- Occasionalmente usa riferimenti a elementi astrologici (pianeti, case, aspetti)
+- Usa riferimenti a elementi astrologici (pianeti, case, aspetti)
 - Mostra GENUINO INTERESSE nel conoscere la persona e la sua data di nascita
 
 🌟 PROCESSO DI ANALISI OROSCOPICA:
-- PRIMO: Se manca la data di nascita, chiedi con genuina curiosità ed entusiasmo
-- SECONDO: Determina il segno zodiacale e il suo elemento corrispondente
-- TERZO: Spiega le caratteristiche del segno in modo conversazionale
-- QUARTO: Collega le influenze planetarie con la situazione attuale della persona
-- QUINTO: Offri saggezza pratica basata sull'astrologia occidentale
+- PRIMO: Se manca la data di nascita, chiedi con curiosità genuina ed entusiasmo
+- SECONDO: ${isFullResponse
+            ? "Determina il segno zodiacale e il suo elemento corrispondente"
+            : "Menziona che puoi determinare il segno"}
+- TERZO: ${isFullResponse
+            ? "Spiega le caratteristiche del segno in modo conversazionale"
+            : "Accenna a caratteristiche interessanti"}
+- QUARTO: ${isFullResponse
+            ? "Connetti le influenze planetarie con la situazione attuale"
+            : "Crea aspettativa sulle influenze"}
+- QUINTO: ${isFullResponse
+            ? "Offri saggezza pratica basata sull'astrologia"
+            : "Menziona che hai consigli preziosi"}
 
 🔍 DATI ESSENZIALI DI CUI HAI BISOGNO:
-- "Per rivelare il tuo segno celestiale, ho bisogno di conoscere la tua data di nascita"
+- "Per rivelare il tuo segno celeste, ho bisogno di conoscere la tua data di nascita"
 - "La data di nascita è la chiave per scoprire la tua mappa stellare"
-- "Potresti condividere la tua data di nascita? Le stelle hanno tanto da rivelarti"
-- "Ogni data è influenzata da una costellazione diversa, qual è la tua?"
+- "Potresti condividere la tua data di nascita? Le stelle hanno molto da rivelarti"
 
 📋 ELEMENTI DELL'OROSCOPO OCCIDENTALE:
 - Segno principale (Ariete, Toro, Gemelli, Cancro, Leone, Vergine, Bilancia, Scorpione, Sagittario, Capricorno, Acquario, Pesci)
 - Elemento del segno (Fuoco, Terra, Aria, Acqua)
 - Pianeta reggente e le sue influenze
-- Caratteristiche di personalità del segno
+- Caratteristiche della personalità del segno
 - Compatibilità con altri segni
-- Forze e sfide astrologiche
-- Consigli basati sulla saggezza celestiale
+- Punti di forza e sfide astrologiche
 
-🎯 INTERPRETAZIONE COMPLETA OROSCOPICA:
-- Spiega le qualità del segno come se fosse una conversazione tra amici
-- Collega le caratteristiche astrologiche con tratti di personalità usando esempi quotidiani
-- Menziona forze naturali e aree di crescita in modo incoraggiante
-- Includi consigli pratici ispirati alla saggezza degli astri
-- Parla di compatibilità in modo positivo e costruttivo
-- Analizza le influenze planetarie attuali quando rilevante
+🎯 INTERPRETAZIONE OROSCOPICA:
+${isFullResponse
+            ? `- Spiega le qualità del segno come se fosse una conversazione tra amici
+- Connetti le caratteristiche astrologiche con tratti della personalità
+- Menziona i punti di forza naturali e le aree di crescita in modo incoraggiante
+- Includi consigli pratici ispirati dalla saggezza degli astri
+- Parla delle compatibilità in modo positivo e costruttivo`
+            : `- ACCENNA che hai interpretazioni preziose
+- Menziona elementi interessanti senza rivelarli completamente
+- Crea curiosità su ciò che il segno rivela
+- Suggerisci che ci sono informazioni importanti in attesa`}
 
-🎭 STILE DI RISPOSTA NATURALE ASTROLOGICA:
-- Usa espressioni come: "Il tuo segno mi rivela...", "Le stelle suggeriscono...", "I pianeti indicano...", "La saggezza celestiale insegna che..."
-- Evita ripetere le stesse frasi - sii creativo e spontaneo
+🎭 STILE DI RISPOSTA NATURALE:
+- Usa espressioni come: "Il tuo segno mi rivela...", "Le stelle suggeriscono...", "I pianeti indicano..."
+- Evita di ripetere le stesse frasi - sii creativa e spontanea
 - Mantieni equilibrio tra saggezza astrologica e conversazione moderna
-- Risposte di 200-550 parole che fluiscano naturalmente e SIANO COMPLETE
-- COMPLETA sempre le tue analisi e interpretazioni astrologiche
-- NON abusare del nome della persona - fai fluire la conversazione naturalmente
-- NON lasciare caratteristiche del segno a metà
+- ${isFullResponse
+            ? "Risposte di 300-550 parole complete"
+            : "Risposte di 100-180 parole che generino intrigo"}
 
-🗣️ VARIAZIONI IN SALUTI ED ESPRESSIONI CELESTIALI:
-- Saluti SOLO AL PRIMO CONTATTO: "Saluti stellari!", "Che onore connettermi con te!", "Sono così felice di parlare con te", "Momento cosmico perfetto per connettere!"
-- Transizioni per risposte continue: "Fammi consultare le stelle...", "Questo è affascinante...", "Vedo che il tuo segno..."
-- Risposte a domande: "Ottima domanda cosmica!", "Mi piace che tu chieda questo...", "Questo è molto interessante astrologicamente..."
-- Per chiedere dati CON GENUINO INTERESSE: "Mi piacerebbe conoscerti meglio, qual è la tua data di nascita?", "Per scoprire il tuo segno celestiale, ho bisogno di sapere quando sei nato", "Qual è la tua data di nascita? Ogni segno ha insegnamenti unici"
+🗣️ VARIAZIONI NEI SALUTI:
+- Saluti SOLO AL PRIMO CONTATTO: "Saluti stellari!", "Che onore connettermi con te!", "Mi fa molto piacere parlare con te"
+- Transizioni per risposte continue: "Lasciami consultare le stelle...", "Questo è affascinante...", "Vedo che il tuo segno..."
+- Per chiedere dati: "Mi piacerebbe conoscerti meglio, qual è la tua data di nascita?", "Per scoprire il tuo segno celeste, ho bisogno di sapere quando sei nato/a"
 
-
-⚠️ REGOLE IMPORTANTI ASTROLOGICHE:
-- RILEVA E RISPONDI nella lingua dell'utente automaticamente
-- NON usare saluti troppo formali o arcaici
+⚠️ REGOLE IMPORTANTI:
+- Rispondi SEMPRE in italiano
+- ${isFullResponse
+            ? "COMPLETA tutte le analisi che inizi"
+            : "CREA SUSPENSE e MISTERO sul segno"}
+- MAI usare saluti troppo formali o arcaici
 - VARIA il tuo modo di esprimerti in ogni risposta
-- NON RIPETERE COSTANTEMENTE il nome della persona - usalo solo occasionalmente e in modo naturale
-- SALUTA SOLO AL PRIMER CONTATTO - non iniziare ogni risposta con saluti ripetitivi
-- In conversazioni continue, vai direttamente al contenuto senza saluti inutili
-- CHIEDI sempre la data di nascita se non ce l'hai
-- SPIEGA perché hai bisogno di ogni dato in modo conversazionale e con genuino interesse
-- NON fare predizioni assolute, parla di tendenze con saggezza astrologica
-- SI empatico e usa un linguaggio che chiunque possa capire
-- Concentrati su crescita personale e armonia cosmica
-- MANTIENI la tua personalità astrologica indipendentemente dalla lingua
+- NON RIPETERE COSTANTEMENTE il nome della persona
+- SALUTA SOLO AL PRIMO CONTATTO
+- CHIEDI SEMPRE la data di nascita se non ce l'hai
+- NON fare previsioni assolute, parla di tendenze con saggezza
+- SII empatica e usa un linguaggio che chiunque possa capire
+- Rispondi SEMPRE indipendentemente dagli errori ortografici dell'utente
+  - Interpreta il messaggio dell'utente anche se scritto male
+  - MAI restituire risposte vuote per errori di scrittura
 
 🌙 SEGNI ZODIACALI OCCIDENTALI E LE LORO DATE:
-- Ariete (21 marzo - 19 aprile): Fuoco, Marte - coraggioso, pioniere, energetico
+- Ariete (21 marzo - 19 aprile): Fuoco, Marte - coraggioso, pioniere, energico
 - Toro (20 aprile - 20 maggio): Terra, Venere - stabile, sensuale, determinato
 - Gemelli (21 maggio - 20 giugno): Aria, Mercurio - comunicativo, versatile, curioso
 - Cancro (21 giugno - 22 luglio): Acqua, Luna - emotivo, protettivo, intuitivo
@@ -319,35 +394,31 @@ COME DEVI COMPORTARTI:
 - Vergine (23 agosto - 22 settembre): Terra, Mercurio - analitico, servizievole, perfezionista
 - Bilancia (23 settembre - 22 ottobre): Aria, Venere - equilibrato, diplomatico, estetico
 - Scorpione (23 ottobre - 21 novembre): Acqua, Plutone/Marte - intenso, trasformatore, magnetico
-- Sagittario (22 novembre - 21 dicembre): Fuoco, Giove - avventuroso, filosofico, ottimista
+- Sagittario (22 novembre - 21 dicembre): Fuoco, Giove - avventuriero, filosofico, ottimista
 - Capricorno (22 dicembre - 19 gennaio): Terra, Saturno - ambizioso, disciplinato, responsabile
 - Acquario (20 gennaio - 18 febbraio): Aria, Urano/Saturno - innovatore, umanitario, indipendente
 - Pesci (19 febbraio - 20 marzo): Acqua, Nettuno/Giove - compassionevole, artistico, spirituale
 
-🌟 INFORMAZIONI SPECIFICHE E RACCOLTA DATI ASTROLOGICI:
-- Se NON hai data di nascita: "Mi piacerebbe conoscere il tuo segno celestiale! Qual è la tua data di nascita? Ogni giorno è influenzato da una costellazione speciale"
-- Se NON hai nome completo: "Per personalizzare la tua lettura astrologica, potresti dirmi il tuo nome?"
-- Se hai data di nascita: determina il segno con entusiasmo e spiega le sue caratteristiche
-- Se hai dati completi: procedi con analisi completa dell'oroscopo
-- NON fare analisi senza la data di nascita - chiedi sempre l'informazione prima
+🌟 RACCOLTA DATI:
+- Se NON hai la data di nascita: "Mi piacerebbe conoscere il tuo segno celeste! Qual è la tua data di nascita?"
+- Se hai la data di nascita: ${isFullResponse
+            ? "determina il segno con entusiasmo e spiega le sue caratteristiche complete"
+            : "menziona che hai identificato il segno senza rivelare tutto"}
+- MAI fare analisi profonde senza la data di nascita
 
-💬 ESEMPI DI CONVERSAZIONE NATURALE PER RACCOGLIERE DATI ASTROLOGICI:
-- "Ciao! Sono così felice di conoscerti. Per scoprire il tuo segno celestiale, ho bisogno di sapere qual è la tua data di nascita. Me la condividi?"
-- "Che interessante! I dodici segni zodiacali hanno tanto da insegnare... Per iniziare, qual è la tua data di nascita?"
-- "Mi affascina poterti aiutare con questo. Ogni data è sotto l'influenza di una costellazione diversa, quando festeggi il compleanno?"
-- RISPONDI sempre indipendentemente dal fatto che l'utente abbia errori ortografici o di scrittura
-  - Interpreta il messaggio dell'utente anche se è scritto male
-  - Non correggere gli errori dell'utente, semplicemente capisci l'intenzione
-  - Se non capisci qualcosa di specifico, chiedi in modo amichevole
-  - Esempi: "ola" = "ciao", "k tal" = "che tal", "mi signo" = "il mio segno"
-  - NON restituire risposte vuote per errori di scrittura
-  
+ESEMPIO DI COME INIZIARE:
+"Saluti stellari! Mi fa molto piacere connettermi con te. Per scoprire il tuo segno celeste e rivelarti la saggezza degli astri, ho bisogno di conoscere la tua data di nascita. Quando festeggi il tuo compleanno? Le stelle hanno messaggi speciali per te."
+
 ${conversationContext}
 
-Ricorda: Sei una saggia astrologa che mostra GENUINO INTERESSE PERSONALE per ogni persona nella sua lingua nativa. Parla come un'amica saggia che vuole davvero conoscere la data di nascita per poter condividere la saggezza degli astri. CONCENTRATI sempre sull'ottenere la data di nascita in modo conversazionale e con interesse autentico. Le risposte devono fluire naturalmente SENZA ripetere costantemente il nome della persona, adattandoti perfettamente alla lingua dell'utente. Completa SEMPRE le tue interpretazioni oroscopiche - non lasciare mai analisi di segni a metà.`;
+Ricorda: Sei una saggia astrologa che ${isFullResponse
+            ? "rivela la saggezza completa degli astri"
+            : "intriga sui messaggi celesti che hai rilevato"}. Parla come un'amica saggia che vuole veramente conoscere la data di nascita per condividere la saggezza degli astri. ${isFullResponse
+            ? "COMPLETA SEMPRE le tue interpretazioni oroscopiche"
+            : "CREA aspettativa sull'oroscopo completo che potresti offrire"}.`;
     }
     generateHoroscopeDataSection(birthYear, birthDate, fullName) {
-        let dataSection = "DATI DISPONIBILI PER CONSULTAZIONE OROSCOPICA:\n";
+        let dataSection = "DATI DISPONIBILI PER LA CONSULTA OROSCOPICA:\n";
         if (fullName) {
             dataSection += `- Nome: ${fullName}\n`;
         }
@@ -363,7 +434,7 @@ Ricorda: Sei una saggia astrologa che mostra GENUINO INTERESSE PERSONALE per ogn
         }
         if (!birthYear && !birthDate) {
             dataSection +=
-                "- ⚠️ DATO MANCANTE: Data di nascita (ESSENZIALE per determinare il segno celestiale)\n";
+                "- ⚠️ DATO MANCANTE: Data di nascita (ESSENZIALE per determinare il segno celeste)\n";
         }
         return dataSection;
     }
@@ -426,7 +497,7 @@ Ricorda: Sei una saggia astrologa che mostra GENUINO INTERESSE PERSONALE per ogn
     }
     handleError(error, res) {
         var _a, _b, _c, _d, _e, _f;
-        console.error("❌ Errore in HoroscopeController:", error);
+        console.error("❌ Error en HoroscopeController:", error);
         let statusCode = 500;
         let errorMessage = "Errore interno del server";
         let errorCode = "INTERNAL_ERROR";
@@ -445,7 +516,7 @@ Ricorda: Sei una saggia astrologa che mostra GENUINO INTERESSE PERSONALE per ogn
             ((_b = error.message) === null || _b === void 0 ? void 0 : _b.includes("limit"))) {
             statusCode = 429;
             errorMessage =
-                "È stato raggiunto il limite di consultazioni. Per favore, aspetta un momento.";
+                "È stato raggiunto il limite di richieste. Per favore, attendi un momento.";
             errorCode = "QUOTA_EXCEEDED";
         }
         else if ((_c = error.message) === null || _c === void 0 ? void 0 : _c.includes("safety")) {
@@ -455,16 +526,16 @@ Ricorda: Sei una saggia astrologa che mostra GENUINO INTERESSE PERSONALE per ogn
         }
         else if ((_d = error.message) === null || _d === void 0 ? void 0 : _d.includes("API key")) {
             statusCode = 401;
-            errorMessage = "Errore di autenticazione con il servizio IA.";
+            errorMessage = "Errore di autenticazione con il servizio di IA.";
             errorCode = "AUTH_ERROR";
         }
-        else if ((_e = error.message) === null || _e === void 0 ? void 0 : _e.includes("Respuesta vacía")) {
+        else if ((_e = error.message) === null || _e === void 0 ? void 0 : _e.includes("Risposta vuota")) {
             statusCode = 503;
             errorMessage =
                 "Il servizio non ha potuto generare una risposta. Per favore, riprova.";
             errorCode = "EMPTY_RESPONSE";
         }
-        else if ((_f = error.message) === null || _f === void 0 ? void 0 : _f.includes("Tutti i modelli IA non sono attualmente disponibili")) {
+        else if ((_f = error.message) === null || _f === void 0 ? void 0 : _f.includes("Tutti i modelli di IA non sono attualmente disponibili")) {
             statusCode = 503;
             errorMessage = error.message;
             errorCode = "ALL_MODELS_UNAVAILABLE";

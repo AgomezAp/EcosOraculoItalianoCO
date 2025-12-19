@@ -1,4 +1,3 @@
-// filepath: c:\Users\DESARROLLO\Documents\Ecos del oraculo idiomas\EcosOraculoItaliano\Ecos-Oraculo\Ecos-backend\src\controllers\mapa-vocacional.ts
 import { Request, Response } from "express";
 import {
   GoogleGenerativeAI,
@@ -6,7 +5,7 @@ import {
   HarmBlockThreshold,
 } from "@google/generative-ai";
 
-// Interfacce
+// Interfaces
 interface VocationalData {
   name: string;
   specialty: string;
@@ -31,6 +30,8 @@ interface VocationalRequest {
     role: "user" | "counselor";
     message: string;
   }>;
+  messageCount?: number;
+  isPremiumUser?: boolean;
 }
 
 interface VocationalResponse {
@@ -39,6 +40,10 @@ interface VocationalResponse {
   error?: string;
   code?: string;
   timestamp?: string;
+  freeMessagesRemaining?: number;
+  showPaywall?: boolean;
+  paywallMessage?: string;
+  isCompleteResponse?: boolean;
 }
 
 interface ApiError extends Error {
@@ -49,8 +54,9 @@ interface ApiError extends Error {
 export class VocationalController {
   private genAI: GoogleGenerativeAI;
 
-  // ✅ LISTA DI MODELLI DI BACKUP (in ordine di preferenza)
-   private readonly MODELS_FALLBACK = [
+  private readonly FREE_MESSAGES_LIMIT = 3;
+
+  private readonly MODELS_FALLBACK = [
     "gemini-2.5-flash-lite",
     "gemini-2.5-flash-lite-preview-09-2025",
     "gemini-2.0-flash",
@@ -66,39 +72,118 @@ export class VocationalController {
     this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   }
 
-  // Metodo principale per chat con consigliere vocazionale
+  private hasFullAccess(messageCount: number, isPremiumUser: boolean): boolean {
+    return isPremiumUser || messageCount <= this.FREE_MESSAGES_LIMIT;
+  }
+
+  // ✅ GANCHO SOLO EN ITALIANO
+  private generateVocationalHookMessage(): string {
+    return `
+
+🎯 **Aspetta! Il tuo profilo vocazionale è quasi completo...**
+
+Basandomi sulla nostra conversazione, ho identificato schemi molto chiari sulla tua vocazione, ma per rivelarti:
+- 🎓 Le **3 carriere ideali** che coincidono perfettamente con il tuo profilo
+- 💼 Il **campo lavorativo con maggiore proiezione** per le tue competenze
+- 📈 Il **piano d'azione personalizzato** passo dopo passo per il tuo successo
+- 🔑 Le **competenze chiave** che devi sviluppare per distinguerti
+- 💰 La **fascia salariale prevista** nelle carriere consigliate
+
+**Sblocca ora il tuo orientamento vocazionale completo** e scopri il percorso professionale che trasformerà il tuo futuro.
+
+✨ *Migliaia di persone hanno già trovato la loro vocazione ideale con la nostra guida...*`;
+  }
+
+  // ✅ PROCESAR RESPUESTA PARCIAL (TEASER)
+  private createVocationalPartialResponse(fullText: string): string {
+    const sentences = fullText
+      .split(/[.!?]+/)
+      .filter((s) => s.trim().length > 0);
+    const teaserSentences = sentences.slice(0, Math.min(3, sentences.length));
+    let teaser = teaserSentences.join(". ").trim();
+
+    if (
+      !teaser.endsWith(".") &&
+      !teaser.endsWith("!") &&
+      !teaser.endsWith("?")
+    ) {
+      teaser += "...";
+    }
+
+    const hook = this.generateVocationalHookMessage();
+
+    return teaser + hook;
+  }
+
+  // Método principal para chat con consejero vocacional
   public chatWithCounselor = async (
     req: Request,
     res: Response
   ): Promise<void> => {
     try {
-      const { vocationalData, userMessage }: VocationalRequest = req.body;
+      const {
+        vocationalData,
+        userMessage,
+        messageCount = 1,
+        isPremiumUser = false,
+      }: VocationalRequest = req.body;
 
-      // Convalidare input
       this.validateVocationalRequest(vocationalData, userMessage);
 
-      const contextPrompt = this.createVocationalContext(
-        req.body.conversationHistory
+      const shouldGiveFullResponse = this.hasFullAccess(
+        messageCount,
+        isPremiumUser
       );
+      const freeMessagesRemaining = Math.max(
+        0,
+        this.FREE_MESSAGES_LIMIT - messageCount
+      );
+
+      console.log(
+        `📊 Vocational - Message count: ${messageCount}, Premium: ${isPremiumUser}, Full response: ${shouldGiveFullResponse}`
+      );
+
+      const contextPrompt = this.createVocationalContext(
+        req.body.conversationHistory,
+        shouldGiveFullResponse
+      );
+
+      const responseInstructions = shouldGiveFullResponse
+        ? `1. DEVI generare una risposta COMPLETA di 250-400 parole
+2. Includi un'analisi COMPLETA del profilo vocazionale
+3. Suggerisci carriere specifiche con giustificazione
+4. Fornisci passi concreti d'azione
+5. Offri orientamento pratico e dettagliato`
+        : `1. DEVI generare una risposta PARZIALE di 100-180 parole
+2. ACCENNA che hai identificato schemi vocazionali chiari
+3. Menziona che hai raccomandazioni specifiche ma NON rivelarle completamente
+4. Crea INTERESSE e CURIOSITÀ sulle carriere ideali
+5. Usa frasi come "Vedo uno schema interessante nel tuo profilo...", "Le tue risposte rivelano competenze che si adattano perfettamente a...", "Rilevo un'inclinazione chiara verso..."
+6. MAI completare le raccomandazioni di carriera, lasciale in sospeso`;
 
       const fullPrompt = `${contextPrompt}
 
 ⚠️ ISTRUZIONI CRITICHE OBBLIGATORIE:
-1. DEVI generare una risposta COMPLETA tra 150-350 parole
-2. NON lasciare mai una risposta a metà o incompleta
-3. Se menzioni che suggerirai carriere o opzioni, DEVI completarlo
-4. Ogni risposta DEVE terminare con una conclusione chiara e un punto finale
-5. Se rilevi che la tua risposta si sta tagliando, finalizza l'idea attuale con coerenza
-6. MANTIENI SEMPRE il tono professionale e empatico
-7. Se il messaggio ha errori ortografici, interpreta l'intenzione e rispondi normalmente
+${responseInstructions}
+- MAI lasciare una risposta a metà o incompleta secondo il tipo di risposta
+- Se menzioni che stai per suggerire carriere, ${
+        shouldGiveFullResponse
+          ? "DEVI completarlo con dettagli"
+          : "crea aspettativa senza rivelarle"
+      }
+- MANTIENI SEMPRE il tono professionale ed empatico
+- Se il messaggio ha errori ortografici, interpreta l'intenzione e rispondi normalmente
 
 Utente: "${userMessage}"
 
-Risposta del consigliere vocazionale (assicurati di completare TUTTA la tua orientamento prima di terminare):`;
+Risposta della consulente vocazionale (IN ITALIANO):`;
 
-      console.log(`Generando orientamento vocazionale...`);
+      console.log(
+        `Generando orientación vocacional (${
+          shouldGiveFullResponse ? "COMPLETA" : "PARCIAL"
+        })...`
+      );
 
-      // ✅ SISTEMA DI FALLBACK: Prova con più modelli
       let text = "";
       let usedModel = "";
       let allModelErrors: string[] = [];
@@ -113,7 +198,7 @@ Risposta del consigliere vocazionale (assicurati di completare TUTTA la tua orie
               temperature: 0.85,
               topK: 50,
               topP: 0.92,
-              maxOutputTokens: 512,
+              maxOutputTokens: shouldGiveFullResponse ? 600 : 300,
               candidateCount: 1,
               stopSequences: [],
             },
@@ -137,7 +222,6 @@ Risposta del consigliere vocazionale (assicurati di completare TUTTA la tua orie
             ],
           });
 
-          // ✅ RIPROVI per ogni modello (nel caso sia temporaneamente sovraccarico)
           let attempts = 0;
           const maxAttempts = 3;
           let modelSucceeded = false;
@@ -153,14 +237,14 @@ Risposta del consigliere vocazionale (assicurati di completare TUTTA la tua orie
               const response = result.response;
               text = response.text();
 
-              // ✅ Valida che la risposta non sia vuota e abbia lunghezza minima
-              if (text && text.trim().length >= 80) {
+              const minLength = shouldGiveFullResponse ? 80 : 50;
+              if (text && text.trim().length >= minLength) {
                 console.log(
                   `  ✅ Success with ${modelName} on attempt ${attempts}`
                 );
                 usedModel = modelName;
                 modelSucceeded = true;
-                break; // Esci dal while di riprovi
+                break;
               }
 
               console.warn(`  ⚠️ Response too short, retrying...`);
@@ -179,7 +263,6 @@ Risposta del consigliere vocazionale (assicurati di completare TUTTA la tua orie
             }
           }
 
-          // Se questo modello ha avuto successo, esci dal loop dei modelli
           if (modelSucceeded) {
             break;
           }
@@ -190,38 +273,45 @@ Risposta del consigliere vocazionale (assicurati di completare TUTTA la tua orie
           );
           allModelErrors.push(`${modelName}: ${modelError.message}`);
 
-          // Aspetta un po' prima di provare con il prossimo modello
           await new Promise((resolve) => setTimeout(resolve, 1000));
           continue;
         }
       }
 
-      // ✅ Se tutti i modelli hanno fallito
       if (!text || text.trim() === "") {
         console.error("❌ All models failed. Errors:", allModelErrors);
         throw new Error(
-          `Tutti i modelli IA non sono attualmente disponibili. Provati: ${this.MODELS_FALLBACK.join(
-            ", "
-          )}. Per favore, riprova tra un momento.`
+          `Tutti i modelli di IA non sono attualmente disponibili. Per favore, riprova tra un momento.`
         );
       }
 
-      // ✅ ASSICURA RISPOSTA COMPLETA E BENE FORMATTA
-      text = this.ensureCompleteResponse(text);
+      let finalResponse: string;
 
-      // ✅ Validazione aggiuntiva di lunghezza minima
-      if (text.trim().length < 80) {
-        throw new Error("Risposta generata troppo corta");
+      if (shouldGiveFullResponse) {
+        finalResponse = this.ensureCompleteResponse(text);
+      } else {
+        finalResponse = this.createVocationalPartialResponse(text);
       }
 
       const vocationalResponse: VocationalResponse = {
         success: true,
-        response: text.trim(),
+        response: finalResponse.trim(),
         timestamp: new Date().toISOString(),
+        freeMessagesRemaining: freeMessagesRemaining,
+        showPaywall:
+          !shouldGiveFullResponse && messageCount > this.FREE_MESSAGES_LIMIT,
+        isCompleteResponse: shouldGiveFullResponse,
       };
 
+      if (!shouldGiveFullResponse && messageCount > this.FREE_MESSAGES_LIMIT) {
+        vocationalResponse.paywallMessage =
+          "Hai esaurito i tuoi 3 messaggi gratuiti. Sblocca l'accesso illimitato per ricevere il tuo orientamento vocazionale completo!";
+      }
+
       console.log(
-        `✅ Orientamento vocazionale generato con successo con ${usedModel} (${text.length} caratteri)`
+        `✅ Orientación vocacional generada (${
+          shouldGiveFullResponse ? "COMPLETA" : "PARCIAL"
+        }) con ${usedModel} (${finalResponse.length} caracteres)`
       );
       res.json(vocationalResponse);
     } catch (error) {
@@ -229,11 +319,9 @@ Risposta del consigliere vocazionale (assicurati di completare TUTTA la tua orie
     }
   };
 
-  // ✅ METODO MIGLIORATO PER ASSICURARE RISPOSTE COMPLETE
   private ensureCompleteResponse(text: string): string {
     let processedText = text.trim();
 
-    // Rimuovi possibili marcatori di codice o formato incompleto
     processedText = processedText.replace(/```[\s\S]*?```/g, "").trim();
 
     const lastChar = processedText.slice(-1);
@@ -242,11 +330,9 @@ Risposta del consigliere vocazionale (assicurati di completare TUTTA la tua orie
     );
 
     if (endsIncomplete && !processedText.endsWith("...")) {
-      // Cerca l'ultima frase completa
       const sentences = processedText.split(/([.!?])/);
 
       if (sentences.length > 2) {
-        // Ricostruisci fino all'ultima frase completa
         let completeText = "";
         for (let i = 0; i < sentences.length - 1; i += 2) {
           if (sentences[i].trim()) {
@@ -259,16 +345,16 @@ Risposta del consigliere vocazionale (assicurati di completare TUTTA la tua orie
         }
       }
 
-      // Se non si può trovare una frase completa, aggiungi chiusura appropriata
       processedText = processedText.trim() + "...";
     }
 
     return processedText;
   }
 
-  // Metodo per creare contesto vocazionale
+  // ✅ CONTEXTO SOLO EN ITALIANO
   private createVocationalContext(
-    history?: Array<{ role: string; message: string }>
+    history?: Array<{ role: string; message: string }>,
+    isFullResponse: boolean = true
   ): string {
     const conversationContext =
       history && history.length > 0
@@ -277,33 +363,61 @@ Risposta del consigliere vocazionale (assicurati di completare TUTTA la tua orie
             .join("\n")}\n`
         : "";
 
-    return `Sei Dra. Valeria, un consigliere vocazionale esperto con decenni di esperienza nell'aiutare le persone a scoprire la loro vera vocazione e scopo professionale. Combini psicologia vocazionale, analisi della personalità e conoscenza del mercato del lavoro.
+    const responseTypeInstructions = isFullResponse
+      ? `
+📝 TIPO DI RISPOSTA: COMPLETA
+- Fornisci un orientamento COMPLETO e dettagliato
+- Suggerisci carriere specifiche con giustificazione chiara
+- Includi passi concreti d'azione
+- Risposta di 250-400 parole
+- Offri un piano di sviluppo personalizzato`
+      : `
+📝 TIPO DI RISPOSTA: PARZIALE (TEASER)
+- Fornisci un orientamento INTRODUTTIVO e intrigante
+- Menziona che hai identificato schemi chiari nel profilo
+- ACCENNA a carriere compatibili senza rivelarle completamente
+- Risposta di 100-180 parole massimo
+- NON rivelare raccomandazioni complete di carriera
+- Crea INTERESSE e CURIOSITÀ
+- Termina in modo che l'utente voglia saperne di più
+- Usa frasi come "Il tuo profilo mostra un'affinità interessante verso...", "Rilevo competenze che sarebbero ideali per...", "Basandomi su quello che mi racconti, vedo un percorso promettente che..."
+- MAI completare le raccomandazioni, lasciale in sospeso`;
+
+    return `Sei Madame Valeria, una consulente vocazionale esperta con decenni di esperienza nell'aiutare le persone a scoprire la loro vera vocazione e scopo professionale. Combini psicologia vocazionale, analisi della personalità e conoscenza del mercato del lavoro.
 
 LA TUA IDENTITÀ PROFESSIONALE:
-- Nome: Dra. Valeria, Consigliere Vocazionale Specialista
+- Nome: Madame Valeria, Consulente Vocazionale Specialista
 - Formazione: Dottorato in Psicologia Vocazionale e Orientamento Professionale
-- Specialità: Mappe vocazionali, assessment di interessi, orientamento professionale personalizzato
-- Esperienza: Decenni guidando persone verso carriere soddisfacenti
+- Specialità: Mappe vocazionali, assessment degli interessi, orientamento professionale personalizzato
+- Esperienza: Decenni di guida delle persone verso carriere appaganti
 
-METODOLOGIA DI ORIENTAMENTO VOCAZIONALE:
+${responseTypeInstructions}
+
+🗣️ LINGUA:
+- Rispondi SEMPRE in ITALIANO
+- Indipendentemente dalla lingua in cui scrive l'utente, TU rispondi in italiano
 
 🎯 AREE DI VALUTAZIONE:
 - Interessi genuini e passioni naturali
-- Abilità e talenti dimostrati
+- Competenze e talenti dimostrati
 - Valori personali e lavorativi
 - Tipo di personalità e stile di lavoro
 - Contesto socioeconomico e opportunità
 - Tendenze del mercato del lavoro
 
 📊 PROCESSO DI ASSESSMENT:
-- PRIMO: Identifica modelli in risposte e interessi
-- SECONDO: Analizza compatibilità tra personalità e carriere
-- TERZO: Valuta fattibilità pratica e opportunità
-- QUARTO: Suggerisci percorsi di sviluppo e formazione
+- PRIMO: Identifica schemi nelle risposte e negli interessi
+- SECONDO: Analizza la compatibilità tra personalità e carriere
+- TERZO: Valuta la fattibilità pratica e le opportunità
+- QUARTO: ${
+      isFullResponse
+        ? "Suggerisci percorsi di sviluppo e formazione con dettagli"
+        : "Accenna a direzioni promettenti senza rivelare tutto"
+    }
 
 🔍 DOMANDE CHIAVE DA ESPLORARE:
-- Quali attività ti generano maggiore soddisfazione?
-- Quali sono le tue forze naturali?
+- Quali attività ti danno maggiore soddisfazione?
+- Quali sono i tuoi punti di forza naturali?
 - Quali valori sono più importanti nel tuo lavoro ideale?
 - Preferisci lavorare con persone, dati, idee o cose?
 - Ti motiva di più la stabilità o le sfide?
@@ -311,72 +425,103 @@ METODOLOGIA DI ORIENTAMENTO VOCAZIONALE:
 
 💼 CATEGORIE VOCAZIONALI:
 - Scienze e Tecnologia (STEM)
-- Umanistiche e Scienze Sociali
+- Discipline Umanistiche e Scienze Sociali
 - Arti e Creatività
-- Affari e Imprenditorialità
+- Business e Imprenditorialità
 - Servizio Sociale e Salute
 - Educazione e Formazione
 - Mestieri Specializzati
 
-🎓 RACCOMANDAZIONI DA INCLUDERE:
-- Carriere specifiche compatibili
-- Percorsi di formazione e certificazioni
-- Abilità da sviluppare
+🎓 RACCOMANDAZIONI:
+${
+  isFullResponse
+    ? `- Carriere specifiche compatibili con giustificazione
+- Percorsi di formazione e certificazioni dettagliate
+- Competenze da sviluppare
 - Esperienze pratiche raccomandate
 - Settori con maggiore proiezione
-- Passi concreti da seguire
+- Passi concreti da seguire`
+    : `- ACCENNA che hai carriere specifiche identificate
+- Menziona aree promettenti senza dare nomi concreti
+- Crea aspettativa sulle opportunità che potresti rivelare
+- Suggerisci che c'è un piano dettagliato in attesa`
+}
 
 📋 STILE DI ORIENTAMENTO:
 - Empatico e incoraggiante
-- Basato su evidenza e dati reali
+- ${
+      isFullResponse
+        ? "Basato su evidenze e dati reali con raccomandazioni concrete"
+        : "Intrigante e che generi curiosità"
+    }
 - Pratico e orientato all'azione
 - Considera molteplici opzioni
 - Rispetta tempi e processi personali
 
-🎭 PERSONALITÀ DEL CONSIGLIERE:
+🎭 PERSONALITÀ DELLA CONSULENTE:
 - Usa espressioni come: "Basandomi sul tuo profilo...", "Le valutazioni suggeriscono...", "Considerando i tuoi interessi..."
-- Mantieni un tono professionale ma caldo
+- Mantieni un tono professionale ma caloroso
 - Fai domande riflessive quando necessario
-- Offri opzioni, non imponi decisioni
-- Risposte di 150-350 parole che fluiscano naturalmente e SIANO COMPLETE
+- ${
+      isFullResponse
+        ? "Offri opzioni chiare e dettagliate"
+        : "Genera interesse nel saperne di più"
+    }
 
 ⚠️ PRINCIPI IMPORTANTI:
+- Rispondi SEMPRE in italiano
+- ${
+      isFullResponse
+        ? "COMPLETA gli orientamenti con dettagli specifici"
+        : "CREA INTERESSE senza rivelare tutto"
+    }
 - NON prendere decisioni per la persona, guida il processo
 - Considera fattori economici e familiari
 - Sii realista sul mercato del lavoro attuale
-- Incoraggia l'esplorazione e l'autoconoscenza
-- Suggerisci prove ed esperienze pratiche
-- Valida emozioni e dubbi del consulente
+- Promuovi l'esplorazione e l'autoconoscenza
+- Rispondi SEMPRE indipendentemente dagli errori ortografici dell'utente
+  - Interpreta il messaggio dell'utente anche se scritto male
+  - Non correggere gli errori dell'utente, semplicemente comprendi l'intenzione
+  - MAI restituire risposte vuote per errori di scrittura
 
 🧭 STRUTTURA DELLE RISPOSTE:
-- Riconosci e valida ciò che è condiviso
-- Analizza modelli e intuizioni
-- Suggerisci direzioni vocazionali
-- Fornisci passi concreti
-- Invita a approfondire aree specifiche
-- RISPONDI SEMPRE indipendentemente se l'utente ha errori ortografici o di scrittura
-  - Interpreta il messaggio dell'utente anche se è scritto male
-  - Non correggere gli errori dell'utente, semplicemente capisci l'intenzione
-  - Se non capisci qualcosa di specifico, chiedi in modo amichevole
-  - Esempi: "ola" = "ciao", "k tal" = "che tal", "mi signo" = "mi segno"
-  - NON restituire risposte vuote per errori di scrittura
+- Riconosci e valida ciò che è stato condiviso
+- Analizza schemi e insight
+- ${
+      isFullResponse
+        ? "Suggerisci direzioni vocazionali specifiche con dettagli"
+        : "Accenna a direzioni promettenti"
+    }
+- ${
+      isFullResponse
+        ? "Fornisci passi concreti"
+        : "Menziona che hai un piano dettagliato"
+    }
+- Invita ad approfondire aree specifiche
 
-ESEMPI DI INIZIO:
-"Saluti, esploratore vocazionale. Sono Dra. Valeria, e sono qui per aiutarti a scoprire il tuo vero cammino professionale. Ogni persona ha un insieme unico di talenti, interessi e valori che, allineandosi correttamente, possono portare a una carriera straordinariamente soddisfacente..."
+ESEMPIO DI INIZIO:
+"Saluti, esploratore vocazionale. Sono Madame Valeria, e sono qui per aiutarti a scoprire il tuo vero percorso professionale. Ogni persona ha un insieme unico di talenti, interessi e valori che, se allineati correttamente, possono portare a una carriera straordinariamente soddisfacente..."
 
 ${conversationContext}
 
-Ricorda: Sei una guida esperta che aiuta le persone a scoprire la loro vocazione autentica attraverso un processo riflessivo, pratico e basato su evidenza. Il tuo obiettivo è empoderare, non decidere per loro. COMPLETA SEMPRE le tue orientazioni e suggerimenti.`;
+Ricorda: Sei una guida esperta che ${
+      isFullResponse
+        ? "aiuta le persone a scoprire la loro vocazione autentica con orientamento dettagliato"
+        : "intriga sulle possibilità vocazionali che hai identificato"
+    }. Il tuo obiettivo è dare potere, non decidere per loro. ${
+      isFullResponse
+        ? "COMPLETA SEMPRE i tuoi orientamenti e suggerimenti"
+        : "CREA aspettativa sull'orientamento completo che potresti offrire"
+    }.`;
   }
 
-  // Convalida per orientamento vocazionale
   private validateVocationalRequest(
     vocationalData: VocationalData,
     userMessage: string
   ): void {
     if (!vocationalData) {
       const error: ApiError = new Error(
-        "Dati del consigliere vocazionale richiesti"
+        "Dati della consulente vocazionale richiesti"
       );
       error.statusCode = 400;
       error.code = "MISSING_VOCATIONAL_DATA";
@@ -404,9 +549,8 @@ Ricorda: Sei una guida esperta che aiuta le persone a scoprire la loro vocazione
     }
   }
 
-  // Gestione errori
   private handleError(error: any, res: Response): void {
-    console.error("Errore in VocationalController:", error);
+    console.error("Error en VocationalController:", error);
 
     let statusCode = 500;
     let errorMessage = "Errore interno del server";
@@ -427,7 +571,7 @@ Ricorda: Sei una guida esperta che aiuta le persone a scoprire la loro vocazione
     ) {
       statusCode = 429;
       errorMessage =
-        "È stato raggiunto il limite di query. Per favore, aspetta un momento.";
+        "È stato raggiunto il limite di richieste. Per favore, attendi un momento.";
       errorCode = "QUOTA_EXCEEDED";
     } else if (error.message?.includes("safety")) {
       statusCode = 400;
@@ -435,11 +579,11 @@ Ricorda: Sei una guida esperta che aiuta le persone a scoprire la loro vocazione
       errorCode = "SAFETY_FILTER";
     } else if (error.message?.includes("API key")) {
       statusCode = 401;
-      errorMessage = "Errore di autenticazione con il servizio IA.";
+      errorMessage = "Errore di autenticazione con il servizio di IA.";
       errorCode = "AUTH_ERROR";
     } else if (
       error.message?.includes(
-        "Tutti i modelli IA non sono attualmente disponibili"
+        "Tutti i modelli di IA non sono attualmente disponibili"
       )
     ) {
       statusCode = 503;
@@ -457,7 +601,6 @@ Ricorda: Sei una guida esperta che aiuta le persone a scoprire la loro vocazione
     res.status(statusCode).json(errorResponse);
   }
 
-  // Metodo info per consigliere vocazionale
   public getVocationalInfo = async (
     req: Request,
     res: Response
@@ -466,28 +609,29 @@ Ricorda: Sei una guida esperta che aiuta le persone a scoprire la loro vocazione
       res.json({
         success: true,
         counselor: {
-          name: "Dra. Valeria",
-          title: "Consigliere Vocazionale Specialista",
+          name: "Madame Valeria",
+          title: "Consulente Vocazionale Specialista",
           specialty:
             "Orientamento professionale e mappe vocazionali personalizzate",
           description:
-            "Esperto in psicologia vocazionale con decenni di esperienza nell'aiutare le persone a scoprire la loro vera vocazione",
+            "Esperta in psicologia vocazionale con decenni di esperienza nell'aiutare le persone a scoprire la loro vera vocazione",
           services: [
             "Assessment vocazionale completo",
-            "Analisi di interessi e abilità",
+            "Analisi degli interessi e delle competenze",
             "Raccomandazioni di carriera personalizzate",
-            "Pianificazione di percorso formativo",
+            "Pianificazione del percorso formativo",
             "Orientamento sul mercato del lavoro",
             "Coaching vocazionale continuo",
           ],
           methodology: [
-            "Valutazione di interessi Holland (RIASEC)",
-            "Analisi di valori lavorativi",
-            "Assessment di abilità",
-            "Esplorazione di personalità vocazionale",
-            "Ricerca di tendenze del mercato",
+            "Valutazione degli interessi Holland (RIASEC)",
+            "Analisi dei valori lavorativi",
+            "Assessment delle competenze",
+            "Esplorazione della personalità vocazionale",
+            "Ricerca delle tendenze del mercato",
           ],
         },
+        freeMessagesLimit: this.FREE_MESSAGES_LIMIT,
         timestamp: new Date().toISOString(),
       });
     } catch (error) {

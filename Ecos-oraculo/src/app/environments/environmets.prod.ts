@@ -1,8 +1,8 @@
-  /*   export const environment = {
+    export const environment = {
     production: false,
     apiUrl: 'http://localhost:3010/',
-  };  */ 
-    export const environment = {
+  };  
+ /*    export const environment = {
     production: true,
     apiUrl: 'https://api.echidelloracolo.com/',
-  };  
+  };   */

@@ -331,13 +331,5 @@
         </div>
       </div>
     </div>
-    <app-fortune-wheel
-      *ngIf="showFortuneWheel"
-      [isVisible]="showFortuneWheel"
-      [prizes]="lovePrizes"
-      (onPrizeWon)="onPrizeWon($event)"
-      (onWheelClosed)="onWheelClosed()"
-    >
-    </app-fortune-wheel>
   </body>
 </html>

@@ -16,6 +16,8 @@ export interface AnimalChatRequest {
     role: 'user' | 'guide';
     message: string;
   }>;
+  messageCount?: number; // ✅ NUOVO
+  isPremiumUser?: boolean; // ✅ NUOVO
 }
 
 export interface AnimalChatResponse {
@@ -23,7 +25,11 @@ export interface AnimalChatResponse {
   response?: string;
   error?: string;
   code?: string;
-  timestamp: string;
+  timestamp?: string;
+  freeMessagesRemaining?: number; // ✅ NUOVO
+  showPaywall?: boolean; // ✅ NUOVO
+  paywallMessage?: string; // ✅ NUOVO
+  isCompleteResponse?: boolean; // ✅ NUOVO
 }
 
 export interface AnimalGuideInfo {
@@ -49,10 +55,15 @@ export class AnimalInteriorService {
     this.apiUrl = 'api/animal-interior';
   }
   getGuideInfo(): Observable<AnimalGuideInfo> {
-    return this.http.get<AnimalGuideInfo>(`${this.appUrl}${this.apiUrl}/guide-info`);
+    return this.http.get<AnimalGuideInfo>(
+      `${this.appUrl}${this.apiUrl}/guide-info`
+    );
   }
 
   chatWithGuide(request: AnimalChatRequest): Observable<AnimalChatResponse> {
-    return this.http.post<AnimalChatResponse>(`${this.appUrl}${this.apiUrl}/chat`, request);
+    return this.http.post<AnimalChatResponse>(
+      `${this.appUrl}${this.apiUrl}/chat`,
+      request
+    );
   }
 }
